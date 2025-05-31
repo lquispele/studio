@@ -8,17 +8,18 @@ import * as z from 'zod';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Input } from '@/components/ui/input'; // Changed from Select
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { LoadingSpinner } from '@/components/ui/loading-spinner';
 import { useToast } from '@/hooks/use-toast';
-import { suggestAlternativeRoutes, type SuggestAlternativeRoutesInput, type SuggestAlternativeRoutesOutput } from '@/ai/flows/suggest-alternative-routes';
+import { suggestAlternativeRoutes, type SuggestAlternativeRoutesInput } from '@/ai/flows/suggest-alternative-routes';
 import type { Route, CongestionData, NamedLocation, AIConceptualPath, PathGenerationResult, RouteCoordinate } from '@/lib/types';
-import { Lightbulb, AlertTriangle, CheckCircle, MapPin, Navigation, RouteIcon } from 'lucide-react';
+import { Lightbulb, AlertTriangle, CheckCircle, MapPin, Navigation, RouteIcon, Search } from 'lucide-react';
 
+// Updated form schema for text inputs
 const formSchema = z.object({
-  origin: z.string().min(1, "Por favor, seleccione un origen."),
-  destination: z.string().min(1, "Por favor, seleccione un destino."),
+  originText: z.string().min(3, "Por favor, ingrese un origen (mínimo 3 caracteres)."),
+  destinationText: z.string().min(3, "Por favor, ingrese un destino (mínimo 3 caracteres)."),
 });
 
 type RouteOptimizationFormValues = z.infer<typeof formSchema>;
@@ -26,19 +27,23 @@ type RouteOptimizationFormValues = z.infer<typeof formSchema>;
 interface RouteOptimizationFormProps {
   routes: Route[]; // Admin-defined routes
   congestionData: CongestionData;
-  namedLocations: NamedLocation[];
-  selectedOrigin: NamedLocation | null;
-  setSelectedOrigin: (location: NamedLocation | null) => void;
-  selectedDestination: NamedLocation | null;
-  setSelectedDestination: (location: NamedLocation | null) => void;
+  // namedLocations is kept for potential future use, but not for O/D selection anymore
+  namedLocations: NamedLocation[]; 
+  
+  // These will now be updated with geocoded coordinates
+  selectedOrigin: RouteCoordinate | null;
+  setSelectedOrigin: (location: RouteCoordinate | null) => void;
+  selectedDestination: RouteCoordinate | null;
+  setSelectedDestination: (location: RouteCoordinate | null) => void;
+
   onPathGenerated: (result: PathGenerationResult) => void;
-  aiConceptualPathInfo: AIConceptualPath | null; // To display current AI text
+  aiConceptualPathInfo: AIConceptualPath | null;
 }
 
 export function RouteOptimizationForm({
   routes,
   congestionData,
-  namedLocations,
+  // namedLocations, // Not directly used for O/D selection in this version
   selectedOrigin,
   setSelectedOrigin,
   selectedDestination,
@@ -47,6 +52,7 @@ export function RouteOptimizationForm({
   aiConceptualPathInfo
 }: RouteOptimizationFormProps) {
   const [isLoading, setIsLoading] = useState(false);
+  const [isGeocoding, setIsGeocoding] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const { toast } = useToast();
   const [isGoogleMapsApiLoaded, setIsGoogleMapsApiLoaded] = useState(false);
@@ -54,17 +60,17 @@ export function RouteOptimizationForm({
   const form = useForm<RouteOptimizationFormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      origin: '',
-      destination: '',
+      originText: '',
+      destinationText: '',
     },
   });
 
    useEffect(() => {
-    if (typeof window.google !== 'undefined' && typeof window.google.maps !== 'undefined') {
+    if (typeof window.google !== 'undefined' && typeof window.google.maps !== 'undefined' && typeof window.google.maps.Geocoder !== 'undefined') {
       setIsGoogleMapsApiLoaded(true);
     } else {
       const checkGoogleMaps = setInterval(() => {
-        if (typeof window.google !== 'undefined' && typeof window.google.maps !== 'undefined') {
+        if (typeof window.google !== 'undefined' && typeof window.google.maps !== 'undefined' && typeof window.google.maps.Geocoder !== 'undefined') {
           setIsGoogleMapsApiLoaded(true);
           clearInterval(checkGoogleMaps);
         }
@@ -73,61 +79,103 @@ export function RouteOptimizationForm({
     }
   }, []);
 
-
-  const handleOriginChange = (locationId: string) => {
-    const location = namedLocations.find(loc => loc.id === locationId) || null;
-    setSelectedOrigin(location);
-    form.setValue('origin', locationId);
-    onPathGenerated({ conceptualPath: null, detailedMapPath: null }); 
-  };
-
-  const handleDestinationChange = (locationId: string) => {
-    const location = namedLocations.find(loc => loc.id === locationId) || null;
-    setSelectedDestination(location);
-    form.setValue('destination', locationId);
-    onPathGenerated({ conceptualPath: null, detailedMapPath: null }); 
-  };
-
+  // Effect to clear paths if text inputs change significantly (or on manual clear)
   useEffect(() => {
-    form.setValue('origin', selectedOrigin?.id || '');
-    form.setValue('destination', selectedDestination?.id || '');
-  }, [selectedOrigin, selectedDestination, form]);
+    const subscription = form.watch((value, { name, type }) => {
+      if ((name === 'originText' || name === 'destinationText') && type === 'change') {
+        setSelectedOrigin(null);
+        setSelectedDestination(null);
+        onPathGenerated({ conceptualPath: null, detailedMapPath: null });
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, [form, setSelectedOrigin, setSelectedDestination, onPathGenerated]);
+
+
+  const geocodeAddress = (address: string): Promise<RouteCoordinate> => {
+    return new Promise((resolve, reject) => {
+      if (!isGoogleMapsApiLoaded || typeof google === 'undefined') {
+        reject(new Error("Google Maps API no está cargada."));
+        return;
+      }
+      const geocoder = new google.maps.Geocoder();
+      // Bias geocoding to Tacna, Peru region
+      const tacnaBounds = new google.maps.LatLngBounds(
+        new google.maps.LatLng(-18.2, -70.4), // Southwest corner of Tacna region
+        new google.maps.LatLng(-17.8, -70.0)  // Northeast corner of Tacna region
+      );
+      geocoder.geocode({ address: address, bounds: tacnaBounds, region: 'PE' }, (results, status) => {
+        if (status === google.maps.GeocoderStatus.OK && results && results[0]) {
+          const location = results[0].geometry.location;
+          resolve({ lat: location.lat(), lng: location.lng() });
+        } else {
+          reject(new Error(`Geocoding falló para "${address}": ${status}`));
+        }
+      });
+    });
+  };
+
 
   const onSubmit: SubmitHandler<RouteOptimizationFormValues> = async (data) => {
-    if (!selectedOrigin || !selectedDestination) {
-      toast({
-        title: "Selección Incompleta",
-        description: "Por favor, seleccione tanto un origen como un destino.",
-        variant: "destructive",
-      });
-      return;
-    }
-
     if (!isGoogleMapsApiLoaded) {
       toast({
         title: "Error de Mapa",
-        description: "La API de Google Maps no está cargada. Por favor, espere o refresque la página.",
+        description: "La API de Google Maps (Geocoding) no está cargada. Por favor, espere o refresque la página.",
         variant: "destructive",
       });
       return;
     }
 
     setIsLoading(true);
+    setIsGeocoding(true);
     setAiError(null);
     onPathGenerated({ conceptualPath: null, detailedMapPath: null });
+    setSelectedOrigin(null); // Clear previous markers
+    setSelectedDestination(null);
+
+    let originCoords: RouteCoordinate | null = null;
+    let destinationCoords: RouteCoordinate | null = null;
+
+    try {
+      toast({ title: "Geocodificando Origen...", description: data.originText });
+      originCoords = await geocodeAddress(data.originText + ", Tacna, Peru"); // Add ", Tacna, Peru" for better accuracy
+      setSelectedOrigin(originCoords);
+      toast({ title: "Origen Encontrado", description: `Lat: ${originCoords.lat.toFixed(4)}, Lng: ${originCoords.lng.toFixed(4)}`, variant: "default" });
+
+      toast({ title: "Geocodificando Destino...", description: data.destinationText });
+      destinationCoords = await geocodeAddress(data.destinationText + ", Tacna, Peru"); // Add ", Tacna, Peru" for better accuracy
+      setSelectedDestination(destinationCoords);
+      toast({ title: "Destino Encontrado", description: `Lat: ${destinationCoords.lat.toFixed(4)}, Lng: ${destinationCoords.lng.toFixed(4)}`, variant: "default" });
+
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Error desconocido durante la geocodificación.";
+      toast({ title: "Error de Geocodificación", description: errorMessage, variant: "destructive" });
+      setAiError(errorMessage);
+      setIsLoading(false);
+      setIsGeocoding(false);
+      return;
+    }
+    setIsGeocoding(false);
+
+    if (!originCoords || !destinationCoords) {
+       toast({ title: "Error", description: "No se pudieron obtener coordenadas para origen y/o destino.", variant: "destructive" });
+       setIsLoading(false);
+       return;
+    }
 
     const blockedAdminRouteInfo = routes
       .filter(route => route.status === 'blocked')
       .map(route => ({ name: route.name, description: route.pathDescription }));
 
     const aiInput: SuggestAlternativeRoutesInput = {
-      originCoord: selectedOrigin.coordinates,
-      destinationCoord: selectedDestination.coordinates,
+      originCoord: originCoords,
+      destinationCoord: destinationCoords,
       blockedRouteInfo: blockedAdminRouteInfo,
       congestionData,
     };
 
     try {
+      toast({ title: "Consultando IA para ruta conceptual...", variant: "default"});
       const aiOutput = await suggestAlternativeRoutes(aiInput);
       const conceptualPath = aiOutput.suggestedPath;
 
@@ -135,12 +183,14 @@ export function RouteOptimizationForm({
          throw new Error("La IA no pudo generar una ruta conceptual con suficientes puntos.");
       }
       
+      toast({ title: "IA sugirió waypoints. Obteniendo ruta detallada de Google Maps...", variant: "default"});
       const directionsService = new google.maps.DirectionsService();
       const request: google.maps.DirectionsRequest = {
         origin: conceptualPath.coordinates[0],
         destination: conceptualPath.coordinates[conceptualPath.coordinates.length - 1],
         waypoints: conceptualPath.coordinates.slice(1, -1).map(coord => ({ location: new google.maps.LatLng(coord.lat, coord.lng), stopover: true })),
         travelMode: google.maps.TravelMode.DRIVING,
+        provideRouteAlternatives: false, // We only want one route based on AI waypoints
       };
 
       directionsService.route(request, (result, status) => {
@@ -154,12 +204,12 @@ export function RouteOptimizationForm({
             action: <CheckCircle className="text-green-500" />,
           });
         } else {
-          console.error('Google Maps Directions request failed due to ' + status);
-          setAiError(`Google Maps no pudo trazar una ruta detallada (Error: ${status}). Mostrando ruta conceptual de la IA.`);
-          onPathGenerated({ conceptualPath, detailedMapPath: conceptualPath.coordinates });
+          console.error('Google Maps Directions request failed due to ' + status, result);
+          setAiError(`Google Maps no pudo trazar una ruta detallada con los waypoints de la IA (Error: ${status}). Mostrando ruta conceptual de la IA.`);
+          onPathGenerated({ conceptualPath, detailedMapPath: conceptualPath.coordinates }); // Fallback to AI conceptual path for drawing
            toast({
             title: "Error de Google Maps Directions",
-            description: `No se pudo obtener la ruta detallada (${status}). Se muestra la ruta conceptual.`,
+            description: `No se pudo obtener la ruta detallada (${status}). Se muestra la ruta conceptual de la IA.`,
             variant: "destructive",
           });
         }
@@ -172,7 +222,7 @@ export function RouteOptimizationForm({
       setAiError(errorMessage);
       onPathGenerated({ conceptualPath: null, detailedMapPath: null }); 
       toast({
-        title: "Error en la Optimización",
+        title: "Error en la Optimización con IA",
         description: errorMessage,
         variant: "destructive",
         action: <AlertTriangle className="text-white"/>,
@@ -180,18 +230,22 @@ export function RouteOptimizationForm({
       setIsLoading(false);
     }
   };
-
+  
+  // Reset form and clear selections if admin routes change
   useEffect(() => {
-    form.reset({ origin: selectedOrigin?.id || '', destination: selectedDestination?.id || '' });
+    form.reset({ originText: '', destinationText: '' });
+    setSelectedOrigin(null);
+    setSelectedDestination(null);
+    onPathGenerated({ conceptualPath: null, detailedMapPath: null });
     setAiError(null);
-  }, [routes, selectedOrigin, selectedDestination, form, onPathGenerated]);
+  }, [routes, form, setSelectedOrigin, setSelectedDestination, onPathGenerated]);
 
 
   return (
     <Card className="shadow-lg mt-8">
       <CardHeader>
         <CardTitle className="font-headline text-2xl flex items-center"><RouteIcon className="mr-2 h-6 w-6 text-primary"/> Calcular Ruta con IA y Google Maps</CardTitle>
-        <CardDescription>Seleccione origen y destino. La IA sugerirá waypoints estratégicos (considerando rutas bloqueadas y sus calles) y Google Maps calculará la ruta detallada.</CardDescription>
+        <CardDescription>Ingrese origen y destino. El sistema geocodificará las direcciones. Luego, la IA sugerirá waypoints estratégicos (considerando rutas bloqueadas y sus calles) y Google Maps calculará la ruta detallada.</CardDescription>
       </CardHeader>
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)}>
@@ -199,51 +253,26 @@ export function RouteOptimizationForm({
             <div className="grid md:grid-cols-2 gap-6">
               <FormField
                 control={form.control}
-                name="origin"
+                name="originText"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel className="flex items-center"><MapPin className="mr-2 h-4 w-4 text-primary" /> Origen</FormLabel>
-                    <Select onValueChange={handleOriginChange} value={field.value || undefined} defaultValue={field.value || undefined}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Seleccione un punto de origen" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {/* Ensure value is not an empty string for "Ninguno" if that's an option */}
-                        {/* <SelectItem value="none_origin_placeholder">Ninguno</SelectItem> */}
-                        {namedLocations.map(loc => (
-                          <SelectItem key={loc.id} value={loc.id}>
-                            {loc.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <FormLabel className="flex items-center"><MapPin className="mr-2 h-4 w-4 text-primary" /> Origen (Ej: Av. Coronel Mendoza, Tacna)</FormLabel>
+                    <FormControl>
+                      <Input placeholder="Ingrese dirección o lugar de origen" {...field} />
+                    </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
               />
               <FormField
                 control={form.control}
-                name="destination"
+                name="destinationText"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel className="flex items-center"><Navigation className="mr-2 h-4 w-4 text-primary" /> Destino</FormLabel>
-                    <Select onValueChange={handleDestinationChange} value={field.value || undefined} defaultValue={field.value || undefined}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Seleccione un punto de destino" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {/* <SelectItem value="none_destination_placeholder">Ninguno</SelectItem> */}
-                        {namedLocations.map(loc => (
-                          <SelectItem key={loc.id} value={loc.id}>
-                            {loc.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <FormLabel className="flex items-center"><Navigation className="mr-2 h-4 w-4 text-primary" /> Destino (Ej: UNJBG, Tacna)</FormLabel>
+                    <FormControl>
+                      <Input placeholder="Ingrese dirección o lugar de destino" {...field} />
+                    </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -251,9 +280,9 @@ export function RouteOptimizationForm({
             </div>
           </CardContent>
           <CardFooter className="flex justify-end">
-            <Button type="submit" disabled={isLoading || !form.formState.isValid || !isGoogleMapsApiLoaded}>
-              {isLoading ? <LoadingSpinner className="mr-2" size={16} /> : <Lightbulb className="mr-2 h-4 w-4" />}
-              Generar Ruta Detallada
+            <Button type="submit" disabled={isLoading || isGeocoding || !isGoogleMapsApiLoaded}>
+              {(isLoading || isGeocoding) ? <LoadingSpinner className="mr-2" size={16} /> : <Search className="mr-2 h-4 w-4" />}
+              {(isGeocoding && !isLoading) ? "Buscando Coordenadas..." : isLoading ? "Generando Ruta..." : "Buscar y Generar Ruta"}
             </Button>
           </CardFooter>
         </form>
@@ -280,7 +309,7 @@ export function RouteOptimizationForm({
          <CardContent className="mt-6 border-t pt-6">
             <Alert variant="destructive">
               <AlertTriangle className="h-5 w-5" />
-              <AlertTitle>Error al obtener sugerencia de ruta</AlertTitle>
+              <AlertTitle>Error al procesar la ruta</AlertTitle>
               <AlertDescription>{aiError}</AlertDescription>
             </Alert>
          </CardContent>
@@ -288,5 +317,6 @@ export function RouteOptimizationForm({
     </Card>
   );
 }
+    
 
     
