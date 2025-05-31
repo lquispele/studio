@@ -97,22 +97,15 @@ const suggestAlternativeRoutesFlow = ai.defineFlow(
     if (!output || !output.suggestedPath || !output.suggestedPath.coordinates || output.suggestedPath.coordinates.length < 2) {
       console.error("AI did not return a valid path with at least 2 coordinates. Input:", input);
 
-      const fallbackCoordinates: RouteCoordinate[] = [];
-      if (input.originCoord) fallbackCoordinates.push(input.originCoord);
-      if (input.destinationCoord) {
-         if (fallbackCoordinates.length === 0 && input.originCoord) { 
-            fallbackCoordinates.push(input.originCoord);
-         }
-        fallbackCoordinates.push(input.destinationCoord);
-      }
+      // Create a direct line from origin to destination as fallback.
+      // input.originCoord and input.destinationCoord are guaranteed by the Zod schema.
+      const fallbackCoordinates: RouteCoordinate[] = [
+        input.originCoord,
+        input.destinationCoord 
+      ];
+      // If origin and destination are the same, fallbackCoordinates will contain two identical points,
+      // which is valid for drawing a polyline (it will appear as a marker/dot).
       
-      if (fallbackCoordinates.length === 0) {
-        fallbackCoordinates.push({lat:0,lng:0}, {lat:0,lng:0});
-      } else if (fallbackCoordinates.length === 1) {
-         fallbackCoordinates.push({...fallbackCoordinates[0]}); 
-      }
-
-
       return {
         suggestedPath: {
           description: "La IA no pudo generar una ruta detallada. Se muestra una línea directa como alternativa.",
@@ -124,3 +117,4 @@ const suggestAlternativeRoutesFlow = ai.defineFlow(
     return output!;
   }
 );
+
