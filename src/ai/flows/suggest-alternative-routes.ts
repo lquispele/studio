@@ -1,3 +1,4 @@
+
 'use server';
 /**
  * @fileOverview This file defines a Genkit flow for suggesting a drivable route between an origin and a destination.
@@ -29,7 +30,7 @@ export type SuggestAlternativeRoutesInput = z.infer<
 const AIConceptualPathSchema = z.object({
   description: z.string().describe('A textual description of the suggested route from origin to destination, mentioning street names where possible.'),
   coordinates: z.array(z.object({ lat: z.number(), lng: z.number() })).describe('An array of latitude/longitude objects representing key waypoints of the suggested drivable path. This path should be traceable on a map by Google Directions. Provide at least 2 points (origin and destination), ideally more for a representative path.'),
-  reasoning: z.string().describe('Explanation of why this route was chosen, considering blockages (with their street descriptions) and congestion, and referencing street names if relevant.'),
+  reasoning: z.string().describe('Explanation of why this route was chosen, considering blockages (with their street descriptions) and congestion, and referencing street names if relevant, particularly detailing how blocked areas were circumvented.'),
 });
 
 const SuggestAlternativeRoutesOutputSchema = z.object({
@@ -68,13 +69,13 @@ Contextual Information:
 
 Task:
 1.  Suggest a plausible, conceptual drivable route from the origin to the destination within Tacna, Peru. Aim to use known streets and avenues of Tacna where possible.
-2.  The route should strategically avoid areas indicated by the 'blockedRouteInfo' (considering their names and street descriptions) and try to minimize travel through highly congested admin-defined routes.
+2.  The route must strategically avoid areas indicated by the 'blockedRouteInfo' (considering their names and street descriptions). It is crucial that the waypoints you provide guide a path that circumvents these blocked areas, not through any part of them. Also, try to minimize travel through highly congested admin-defined routes.
 3.  Provide a textual description of this conceptual path. When possible, mention specific street names, avenues, or notable landmarks in Tacna that your suggested route would take (e.g., "Start by taking Avenida Bolognesi, then turn onto Calle San Martín...").
 4.  Provide a list of key latitude/longitude coordinates that represent this conceptual path, suitable as waypoints for Google Maps Directions API.
     - Include the origin and destination as the first and last points respectively in this 'coordinates' array.
     - Add intermediate waypoints (1-5 points typically, more if very complex) to reasonably represent the path's shape and guide Google Maps around obstacles. Ensure these coordinates are geographically sensible for Tacna.
     - The 'coordinates' array MUST contain at least two points (origin and destination).
-5.  Explain your reasoning for choosing this path, referencing street names or areas if relevant to how you considered blockages (using their provided descriptions) and congestion.
+5.  Explain your reasoning for choosing this path, referencing street names or areas if relevant to how you considered congestion, and particularly detailing how your suggested path and waypoints successfully navigate around the described blocked areas.
 
 Output Format:
 Your output MUST strictly follow the JSON schema provided for 'suggestedPath'.
@@ -99,7 +100,7 @@ const suggestAlternativeRoutesFlow = ai.defineFlow(
       const fallbackCoordinates: RouteCoordinate[] = [];
       if (input.originCoord) fallbackCoordinates.push(input.originCoord);
       if (input.destinationCoord) {
-         if (fallbackCoordinates.length === 0 && input.originCoord) { // Ensure origin is pushed if destination is there but origin wasn't (e.g. if originCoord was nullish but then destinationCoord provided)
+         if (fallbackCoordinates.length === 0 && input.originCoord) { 
             fallbackCoordinates.push(input.originCoord);
          }
         fallbackCoordinates.push(input.destinationCoord);
@@ -108,7 +109,7 @@ const suggestAlternativeRoutesFlow = ai.defineFlow(
       if (fallbackCoordinates.length === 0) {
         fallbackCoordinates.push({lat:0,lng:0}, {lat:0,lng:0});
       } else if (fallbackCoordinates.length === 1) {
-         fallbackCoordinates.push({...fallbackCoordinates[0]}); // Duplicate if only one point, ensure it's a new object
+         fallbackCoordinates.push({...fallbackCoordinates[0]}); 
       }
 
 
@@ -123,5 +124,3 @@ const suggestAlternativeRoutesFlow = ai.defineFlow(
     return output!;
   }
 );
-
-    
