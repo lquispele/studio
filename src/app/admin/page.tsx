@@ -21,7 +21,7 @@ export default function AdminPage() {
       r.status && (r.status === 'open' || r.status === 'blocked') &&
       r.pathDescription && typeof r.pathDescription === 'string' &&
       r.coordinates && Array.isArray(r.coordinates) && 
-      (r.coordinates.length === 0 || r.coordinates.every((c: any) => typeof c.x === 'number' && typeof c.y === 'number'))
+      (r.coordinates.length === 0 || r.coordinates.every((c: any) => typeof c.lat === 'number' && typeof c.lng === 'number'))
     );
   };
 

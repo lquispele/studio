@@ -24,7 +24,7 @@ export default function HomePage() {
       r.status && (r.status === 'open' || r.status === 'blocked') &&
       r.pathDescription && typeof r.pathDescription === 'string' &&
       r.coordinates && Array.isArray(r.coordinates) && 
-      (r.coordinates.length === 0 || r.coordinates.every((c: any) => typeof c.x === 'number' && typeof c.y === 'number'))
+      (r.coordinates.length === 0 || r.coordinates.every((c: any) => typeof c.lat === 'number' && typeof c.lng === 'number'))
     );
   };
 
@@ -115,6 +115,7 @@ export default function HomePage() {
               <li>El estado de las rutas (abierta/bloqueada) se actualiza en tiempo real si un administrador realiza cambios.</li>
               <li>Las sugerencias de rutas alternativas son generadas por IA y buscan la opción más eficiente basada en la ruta actual seleccionada.</li>
               <li>Los datos de congestión y ubicaciones (origen/destino) son simulados para esta demostración.</li>
+               <li>La visualización del mapa utiliza Google Maps.</li>
             </ul>
           </AlertDescription>
         </CardContent>
