@@ -57,7 +57,7 @@ User's Request:
 - Destination: Latitude {{destinationCoord.lat}}, Longitude {{destinationCoord.lng}}
 
 Contextual Information:
-- The following admin-defined routes are currently blocked. Try to route around the areas these routes cover:
+- The following admin-defined routes are currently blocked. You must devise a path that completely avoids the areas these routes cover, based on their names and textual descriptions:
   {{#if blockedRouteInfo}}
   {{#each blockedRouteInfo}}
   - Route Name: "{{name}}" (Covers: {{description}})
@@ -69,13 +69,13 @@ Contextual Information:
 
 Task:
 1.  Suggest a plausible, conceptual drivable route from the origin to the destination within Tacna, Peru. Aim to use known streets and avenues of Tacna where possible.
-2.  The route must strategically avoid areas indicated by the 'blockedRouteInfo' (considering their names and street descriptions). It is crucial that the waypoints you provide guide a path that circumvents these blocked areas, not through any part of them. Also, try to minimize travel through highly congested admin-defined routes.
+2.  **CRITICAL: AVOID BLOCKED AREAS.** Your primary objective for path generation is to completely avoid the areas covered by the 'blockedRouteInfo'. Use their names and street descriptions to understand these no-go zones. The waypoints you generate for the 'coordinates' field MUST define a path that navigates entirely AROUND these blocked areas, not through any segment of them. After ensuring complete avoidance of blocked routes, also try to minimize travel through highly congested admin-defined routes.
 3.  Provide a textual description of this conceptual path. When possible, mention specific street names, avenues, or notable landmarks in Tacna that your suggested route would take (e.g., "Start by taking Avenida Bolognesi, then turn onto Calle San Martín...").
 4.  Provide a list of key latitude/longitude coordinates that represent this conceptual path, suitable as waypoints for Google Maps Directions API.
     - Include the origin and destination as the first and last points respectively in this 'coordinates' array.
     - Add intermediate waypoints (1-5 points typically, more if very complex) to reasonably represent the path's shape and guide Google Maps around obstacles. Ensure these coordinates are geographically sensible for Tacna.
     - The 'coordinates' array MUST contain at least two points (origin and destination).
-5.  Explain your reasoning for choosing this path, referencing street names or areas if relevant to how you considered congestion, and particularly detailing how your suggested path and waypoints successfully navigate around the described blocked areas.
+5.  Explain your reasoning for choosing this path, referencing street names or areas if relevant to how you considered congestion, and **crucially detailing how your suggested path and waypoints successfully navigate around the described blocked areas.**
 
 Output Format:
 Your output MUST strictly follow the JSON schema provided for 'suggestedPath'.
@@ -101,16 +101,16 @@ const suggestAlternativeRoutesFlow = ai.defineFlow(
       // input.originCoord and input.destinationCoord are guaranteed by the Zod schema.
       const fallbackCoordinates: RouteCoordinate[] = [
         input.originCoord,
-        input.destinationCoord 
+        input.destinationCoord
       ];
       // If origin and destination are the same, fallbackCoordinates will contain two identical points,
       // which is valid for drawing a polyline (it will appear as a marker/dot).
       
       return {
         suggestedPath: {
-          description: "La IA no pudo generar una ruta detallada. Se muestra una línea directa como alternativa.",
+          description: "La IA no pudo generar una ruta detallada que evite todos los bloqueos. Se muestra una línea directa como alternativa. Por favor, revise los bloqueos o intente con otros puntos.",
           coordinates: fallbackCoordinates,
-          reasoning: "La IA no pudo generar una respuesta estructurada válida o una ruta con suficientes puntos. Por favor, verifique el modelo de IA o el prompt.",
+          reasoning: "La IA no pudo generar una respuesta estructurada válida o una ruta con suficientes puntos que cumpla todas las restricciones. Por favor, verifique el modelo de IA, el prompt, o la complejidad de los bloqueos.",
         }
       };
     }
