@@ -47,10 +47,9 @@ export function RouteOptimizationForm({
   aiConceptualPathInfo
 }: RouteOptimizationFormProps) {
   const [isLoading, setIsLoading] = useState(false);
-  // aiConceptualPathInfo is now passed as a prop for display
   const [aiError, setAiError] = useState<string | null>(null);
   const { toast } = useToast();
-   const [isGoogleMapsApiLoaded, setIsGoogleMapsApiLoaded] = useState(false);
+  const [isGoogleMapsApiLoaded, setIsGoogleMapsApiLoaded] = useState(false);
 
   const form = useForm<RouteOptimizationFormValues>({
     resolver: zodResolver(formSchema),
@@ -64,7 +63,6 @@ export function RouteOptimizationForm({
     if (typeof window.google !== 'undefined' && typeof window.google.maps !== 'undefined') {
       setIsGoogleMapsApiLoaded(true);
     } else {
-      // Optional: You could set up a listener or check periodically if not immediately available
       const checkGoogleMaps = setInterval(() => {
         if (typeof window.google !== 'undefined' && typeof window.google.maps !== 'undefined') {
           setIsGoogleMapsApiLoaded(true);
@@ -80,14 +78,14 @@ export function RouteOptimizationForm({
     const location = namedLocations.find(loc => loc.id === locationId) || null;
     setSelectedOrigin(location);
     form.setValue('origin', locationId);
-    onPathGenerated({ conceptualPath: null, detailedMapPath: null }); // Clear previous paths
+    onPathGenerated({ conceptualPath: null, detailedMapPath: null }); 
   };
 
   const handleDestinationChange = (locationId: string) => {
     const location = namedLocations.find(loc => loc.id === locationId) || null;
     setSelectedDestination(location);
     form.setValue('destination', locationId);
-    onPathGenerated({ conceptualPath: null, detailedMapPath: null }); // Clear previous paths
+    onPathGenerated({ conceptualPath: null, detailedMapPath: null }); 
   };
 
   useEffect(() => {
@@ -118,12 +116,14 @@ export function RouteOptimizationForm({
     setAiError(null);
     onPathGenerated({ conceptualPath: null, detailedMapPath: null });
 
-    const blockedAdminRoutes = routes.filter(route => route.status === 'blocked').map(route => route.name);
+    const blockedAdminRouteInfo = routes
+      .filter(route => route.status === 'blocked')
+      .map(route => ({ name: route.name, description: route.pathDescription }));
 
     const aiInput: SuggestAlternativeRoutesInput = {
       originCoord: selectedOrigin.coordinates,
       destinationCoord: selectedDestination.coordinates,
-      blockedRoutes: blockedAdminRoutes,
+      blockedRouteInfo: blockedAdminRouteInfo,
       congestionData,
     };
 
@@ -135,7 +135,6 @@ export function RouteOptimizationForm({
          throw new Error("La IA no pudo generar una ruta conceptual con suficientes puntos.");
       }
       
-      // Now, use Google Maps Directions Service with AI's conceptual path
       const directionsService = new google.maps.DirectionsService();
       const request: google.maps.DirectionsRequest = {
         origin: conceptualPath.coordinates[0],
@@ -157,7 +156,6 @@ export function RouteOptimizationForm({
         } else {
           console.error('Google Maps Directions request failed due to ' + status);
           setAiError(`Google Maps no pudo trazar una ruta detallada (Error: ${status}). Mostrando ruta conceptual de la IA.`);
-          // Fallback to AI's conceptual path for map drawing
           onPathGenerated({ conceptualPath, detailedMapPath: conceptualPath.coordinates });
            toast({
             title: "Error de Google Maps Directions",
@@ -172,7 +170,7 @@ export function RouteOptimizationForm({
       console.error('Error optimizing route:', error);
       const errorMessage = error instanceof Error ? error.message : 'Ocurrió un error desconocido al generar la ruta.';
       setAiError(errorMessage);
-      onPathGenerated({ conceptualPath: null, detailedMapPath: null }); // Clear paths on error
+      onPathGenerated({ conceptualPath: null, detailedMapPath: null }); 
       toast({
         title: "Error en la Optimización",
         description: errorMessage,
@@ -181,14 +179,11 @@ export function RouteOptimizationForm({
       });
       setIsLoading(false);
     }
-    // Note: setIsLoading(false) is now handled within the DirectionsService callback or catch block
   };
 
   useEffect(() => {
-    // Reset form and AI results if admin routes change (or origin/destination selected by user)
     form.reset({ origin: selectedOrigin?.id || '', destination: selectedDestination?.id || '' });
     setAiError(null);
-    // aiConceptualPathInfo is managed by parent, onPathGenerated clears the map path
   }, [routes, selectedOrigin, selectedDestination, form, onPathGenerated]);
 
 
@@ -196,7 +191,7 @@ export function RouteOptimizationForm({
     <Card className="shadow-lg mt-8">
       <CardHeader>
         <CardTitle className="font-headline text-2xl flex items-center"><RouteIcon className="mr-2 h-6 w-6 text-primary"/> Calcular Ruta con IA y Google Maps</CardTitle>
-        <CardDescription>Seleccione origen y destino. La IA sugerirá waypoints estratégicos y Google Maps calculará la ruta detallada.</CardDescription>
+        <CardDescription>Seleccione origen y destino. La IA sugerirá waypoints estratégicos (considerando rutas bloqueadas y sus calles) y Google Maps calculará la ruta detallada.</CardDescription>
       </CardHeader>
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)}>
@@ -215,6 +210,8 @@ export function RouteOptimizationForm({
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
+                        {/* Ensure value is not an empty string for "Ninguno" if that's an option */}
+                        {/* <SelectItem value="none_origin_placeholder">Ninguno</SelectItem> */}
                         {namedLocations.map(loc => (
                           <SelectItem key={loc.id} value={loc.id}>
                             {loc.name}
@@ -239,6 +236,7 @@ export function RouteOptimizationForm({
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
+                        {/* <SelectItem value="none_destination_placeholder">Ninguno</SelectItem> */}
                         {namedLocations.map(loc => (
                           <SelectItem key={loc.id} value={loc.id}>
                             {loc.name}
@@ -290,3 +288,5 @@ export function RouteOptimizationForm({
     </Card>
   );
 }
+
+    
