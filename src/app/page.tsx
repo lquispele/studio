@@ -117,12 +117,6 @@ export default function HomePage() {
         <p className="text-lg text-muted-foreground">Optimice sus viajes en bus por Tacna. Evite congestiones y rutas bloqueadas.</p>
       </div>
 
-      <MapDisplay
-        routes={routes}
-        origin={selectedOrigin} // Pass geocoded origin
-        destination={selectedDestination} // Pass geocoded destination
-        aiSuggestedPathCoordinates={detailedPathForMapCoordinates}
-      />
       <RouteOptimizationForm
         routes={routes}
         congestionData={congestion}
@@ -133,6 +127,13 @@ export default function HomePage() {
         setSelectedDestination={setSelectedDestination} // For form to update HomePage state
         onPathGenerated={handlePathGenerated}
         aiConceptualPathInfo={aiConceptualPathInfo}
+      />
+
+      <MapDisplay
+        routes={routes}
+        origin={selectedOrigin} // Pass geocoded origin
+        destination={selectedDestination} // Pass geocoded destination
+        aiSuggestedPathCoordinates={detailedPathForMapCoordinates}
       />
 
       <Card className="mt-8 bg-primary/5 border-primary/20">

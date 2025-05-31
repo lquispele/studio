@@ -27,12 +27,9 @@ export function MapDisplay({ routes, origin, destination, aiSuggestedPathCoordin
   const destinationMarkerRef = useRef<google.maps.Marker | null>(null);
 
   useEffect(() => {
-    // This function will be called by the Google Maps script once it's loaded.
-    // Alternatively, we can check for window.google periodically.
     window.initMap = () => {
       setIsApiLoaded(true);
     };
-    // If google.maps is already loaded (e.g., on HMR or subsequent navigations), set isApiLoaded true
     if (typeof window.google !== 'undefined' && typeof window.google.maps !== 'undefined') {
         setIsApiLoaded(true);
     }
@@ -44,7 +41,6 @@ export function MapDisplay({ routes, origin, destination, aiSuggestedPathCoordin
       const newMap = new google.maps.Map(mapRef.current, {
         center: TACNA_CENTER,
         zoom: 13,
-        // mapId: 'TACNA_TRANSIT_MAP', // Removing mapId to default to standard map, avoids potential configuration issues
         streetViewControl: false,
         mapTypeControl: false,
       });
@@ -56,7 +52,6 @@ export function MapDisplay({ routes, origin, destination, aiSuggestedPathCoordin
   useEffect(() => {
     if (!map) return;
 
-    // Clear existing admin polylines
     adminPolylinesRef.current.forEach(polyline => polyline.setMap(null));
     adminPolylinesRef.current = [];
 
@@ -68,19 +63,13 @@ export function MapDisplay({ routes, origin, destination, aiSuggestedPathCoordin
         const polyline = new google.maps.Polyline({
           path: path,
           geodesic: true,
-          strokeColor: isBlocked ? '#FF0000' : '#0000FF', // Red for blocked, Blue for open
+          strokeColor: isBlocked ? '#FF0000' : '#0000FF', 
           strokeOpacity: isBlocked ? 0.7 : 0.6,
           strokeWeight: isBlocked ? 5 : 4,
           map: map,
-          zIndex: 1, // Admin routes below AI route
+          zIndex: 1, 
           icons: isBlocked ? [{
-            icon: {
-                path: 'M 0,-1 0,1', // Simple dash
-                strokeOpacity: 1,
-                scale: 3,
-                strokeColor: '#FF0000', // Ensure dash color matches line
-                strokeWeight: 2,
-            },
+            icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 3, strokeColor: '#FF0000', strokeWeight: 2 },
             offset: '0',
             repeat: '10px'
           }] : undefined,
@@ -104,90 +93,116 @@ export function MapDisplay({ routes, origin, destination, aiSuggestedPathCoordin
       aiPathPolylineRef.current = new google.maps.Polyline({
         path: path,
         geodesic: true,
-        strokeColor: '#008000', // Green for AI suggested path
+        strokeColor: '#008000', 
         strokeOpacity: 0.9,
         strokeWeight: 6,
         map: map,
-        zIndex: 2 // AI route on top
+        zIndex: 2 
       });
     }
   }, [map, aiSuggestedPathCoordinates]);
 
+  // Effect for Origin/Destination markers
+ useEffect(() => {
+    if (!map) return;
 
-  // Effect for Origin/Destination markers and map bounds
+    // Manage Origin Marker
+    if (origin) {
+      if (!originMarkerRef.current) {
+        originMarkerRef.current = new google.maps.Marker({
+          map: map,
+          title: 'Origen',
+          icon: {
+            path: google.maps.SymbolPath.CIRCLE,
+            scale: 8,
+            fillColor: '#FFA500', // Orange
+            fillOpacity: 1,
+            strokeWeight: 2,
+            strokeColor: '#FFFFFF'
+          },
+          zIndex: 3
+        });
+      }
+      originMarkerRef.current.setPosition(new google.maps.LatLng(origin.lat, origin.lng));
+      if(!originMarkerRef.current.getMap()){ // Add to map if not already there
+          originMarkerRef.current.setMap(map);
+      }
+    } else {
+      if (originMarkerRef.current) {
+        originMarkerRef.current.setMap(null); // Remove from map
+        // originMarkerRef.current = null; // Don't nullify ref, just remove from map
+      }
+    }
+
+    // Manage Destination Marker
+    if (destination) {
+      if (!destinationMarkerRef.current) {
+        destinationMarkerRef.current = new google.maps.Marker({
+          map: map,
+          title: 'Destino',
+          icon: {
+            path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+            scale: 7,
+            rotation: 0,
+            fillColor: '#FF4500', // Red-Orange
+            fillOpacity: 1,
+            strokeWeight: 2,
+            strokeColor: '#FFFFFF'
+          },
+          zIndex: 3
+        });
+      }
+      destinationMarkerRef.current.setPosition(new google.maps.LatLng(destination.lat, destination.lng));
+      if(!destinationMarkerRef.current.getMap()){ // Add to map if not already there
+          destinationMarkerRef.current.setMap(map);
+      }
+    } else {
+      if (destinationMarkerRef.current) {
+        destinationMarkerRef.current.setMap(null); // Remove from map
+        // destinationMarkerRef.current = null; // Don't nullify ref, just remove from map
+      }
+    }
+  }, [map, origin, destination]);
+
+  // Effect for map bounds
   useEffect(() => {
     if (!map) return;
 
-    // Clear previous markers
-    if (originMarkerRef.current) {
-      originMarkerRef.current.setMap(null);
-      originMarkerRef.current = null;
-    }
-    if (destinationMarkerRef.current) {
-      destinationMarkerRef.current.setMap(null);
-      destinationMarkerRef.current = null;
-    }
-
     const bounds = new google.maps.LatLngBounds();
+    let hasElementsToBound = false;
 
     if (origin) {
-      originMarkerRef.current = new google.maps.Marker({
-        position: origin,
-        map: map,
-        title: 'Origen',
-        icon: {
-          path: google.maps.SymbolPath.CIRCLE,
-          scale: 8,
-          fillColor: '#FFA500', // Orange
-          fillOpacity: 1,
-          strokeWeight: 2,
-          strokeColor: '#FFFFFF' // White border for visibility
-        },
-        zIndex: 3 // Markers on top
-      });
       bounds.extend(new google.maps.LatLng(origin.lat, origin.lng));
+      hasElementsToBound = true;
     }
-
     if (destination) {
-      destinationMarkerRef.current = new google.maps.Marker({
-        position: destination,
-        map: map,
-        title: 'Destino',
-         icon: {
-          path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW, // Arrow icon
-          scale: 7,
-          rotation: 0, // Adjust if needed based on map heading or path
-          fillColor: '#FF4500', // Red-Orange
-          fillOpacity: 1,
-          strokeWeight: 2,
-          strokeColor: '#FFFFFF' // White border
-        },
-        zIndex: 3 // Markers on top
-      });
       bounds.extend(new google.maps.LatLng(destination.lat, destination.lng));
+      hasElementsToBound = true;
     }
-
-    // Include AI path in bounds calculation if it exists
     if (aiSuggestedPathCoordinates && aiSuggestedPathCoordinates.length > 0) {
       aiSuggestedPathCoordinates.forEach(coord => bounds.extend(new google.maps.LatLng(coord.lat, coord.lng)));
+      hasElementsToBound = true;
     }
     
-    // Fit map to bounds if any elements are present
-    if (origin || destination || (aiSuggestedPathCoordinates && aiSuggestedPathCoordinates.length > 0)) {
+    if (hasElementsToBound) {
       if (!bounds.isEmpty()) {
         map.fitBounds(bounds);
         // Prevent excessive zoom after fitBounds on single points or very short paths
-        if (map.getZoom() && map.getZoom() > 16) {
-             map.setZoom(16);
-        }
+        const listener = google.maps.event.addListenerOnce(map, 'idle', () => {
+            if (map.getZoom() && map.getZoom() > 16) {
+                 map.setZoom(16);
+            }
+        });
+        // Clean up listener to prevent memory leaks if component unmounts or effect re-runs
+        return () => google.maps.event.removeListener(listener);
       }
     } else {
       // Default view if nothing is selected
       map.setCenter(TACNA_CENTER);
       map.setZoom(13);
     }
-
   }, [map, origin, destination, aiSuggestedPathCoordinates]);
+
 
   return (
     <Card className="shadow-lg">
