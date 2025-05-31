@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -33,6 +34,8 @@ interface RouteOptimizationFormProps {
   setSelectedDestination: (location: NamedLocation | null) => void;
 }
 
+const NONE_VALUE = "__NONE__"; // Special value for "Ninguno" option
+
 export function RouteOptimizationForm({ 
   routes, 
   congestionData, 
@@ -59,15 +62,25 @@ export function RouteOptimizationForm({
   const availableRoutes = routes.filter(route => route.status === 'open');
 
   const handleOriginChange = (locationId: string) => {
-    const location = namedLocations.find(loc => loc.id === locationId) || null;
-    setSelectedOrigin(location);
-    form.setValue('origin', locationId);
+    if (locationId === NONE_VALUE) {
+      setSelectedOrigin(null);
+      form.setValue('origin', ''); 
+    } else {
+      const location = namedLocations.find(loc => loc.id === locationId) || null;
+      setSelectedOrigin(location);
+      form.setValue('origin', locationId);
+    }
   };
 
   const handleDestinationChange = (locationId: string) => {
-    const location = namedLocations.find(loc => loc.id === locationId) || null;
-    setSelectedDestination(location);
-    form.setValue('destination', locationId);
+    if (locationId === NONE_VALUE) {
+      setSelectedDestination(null);
+      form.setValue('destination', '');
+    } else {
+      const location = namedLocations.find(loc => loc.id === locationId) || null;
+      setSelectedDestination(location);
+      form.setValue('destination', locationId);
+    }
   };
   
   useEffect(() => {
@@ -83,7 +96,7 @@ export function RouteOptimizationForm({
     const blockedRoutes = routes.filter(route => route.status === 'blocked').map(route => route.name);
 
     const input: SuggestAlternativeRoutesInput = {
-      currentRoute: data.currentRoute, // AI still uses this primarily
+      currentRoute: data.currentRoute, 
       blockedRoutes,
       congestionData,
     };
@@ -142,7 +155,7 @@ export function RouteOptimizationForm({
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="">Ninguno</SelectItem>
+                        <SelectItem value={NONE_VALUE}>Ninguno</SelectItem>
                         {namedLocations.map(loc => (
                           <SelectItem key={loc.id} value={loc.id}>
                             {loc.name}
@@ -167,7 +180,7 @@ export function RouteOptimizationForm({
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="">Ninguno</SelectItem>
+                        <SelectItem value={NONE_VALUE}>Ninguno</SelectItem>
                         {namedLocations.map(loc => (
                           <SelectItem key={loc.id} value={loc.id}>
                             {loc.name}
