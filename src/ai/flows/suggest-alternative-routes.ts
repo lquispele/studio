@@ -10,7 +10,7 @@
 
 import {ai} from '@/ai/genkit';
 import {z} from 'genkit';
-import type { RouteCoordinate } from '@/lib/types';
+import type { RouteCoordinate, AIConceptualPath } from '@/lib/types'; // Updated to AIConceptualPath
 
 const SuggestAlternativeRoutesInputSchema = z.object({
   originCoord: z.object({ lat: z.number(), lng: z.number() }).describe('The starting coordinates (latitude, longitude).'),
@@ -22,16 +22,16 @@ export type SuggestAlternativeRoutesInput = z.infer<
   typeof SuggestAlternativeRoutesInputSchema
 >;
 
-const AISuggestedPathSchema = z.object({
+// This schema now defines the AI's conceptual path suggestion, which includes waypoints.
+const AIConceptualPathSchema = z.object({
   description: z.string().describe('A textual description of the suggested route from origin to destination.'),
-  coordinates: z.array(z.object({ lat: z.number(), lng: z.number() })).describe('An array of latitude/longitude objects representing key waypoints of the suggested drivable path. This path should be traceable on a map. Provide at least 2 points (origin and destination), ideally more for a representative path.'),
+  coordinates: z.array(z.object({ lat: z.number(), lng: z.number() })).describe('An array of latitude/longitude objects representing key waypoints of the suggested drivable path. This path should be traceable on a map by Google Directions. Provide at least 2 points (origin and destination), ideally more for a representative path.'),
   reasoning: z.string().describe('Explanation of why this route was chosen, considering blockages and congestion.'),
 });
-export type AISuggestedPath = z.infer<typeof AISuggestedPathSchema>;
-
+// Exporting AIConceptualPath type from lib/types.ts, so no need to redefine here.
 
 const SuggestAlternativeRoutesOutputSchema = z.object({
-  suggestedPath: AISuggestedPathSchema,
+  suggestedPath: AIConceptualPathSchema, // Output is the AI's conceptual path
 });
 export type SuggestAlternativeRoutesOutput = z.infer<
   typeof SuggestAlternativeRoutesOutputSchema
@@ -47,7 +47,7 @@ const prompt = ai.definePrompt({
   name: 'suggestRoutePathPrompt',
   input: {schema: SuggestAlternativeRoutesInputSchema},
   output: {schema: SuggestAlternativeRoutesOutputSchema},
-  prompt: `You are an expert route planning assistant for Tacna, Peru. Your goal is to generate a single, drivable route from a given origin to a given destination.
+  prompt: `You are an expert route planning assistant for Tacna, Peru. Your goal is to generate a single, conceptual drivable route from a given origin to a given destination, providing key waypoints. This conceptual route will then be fed into Google Maps Directions API.
 
 User's Request:
 - Origin: Latitude {{originCoord.lat}}, Longitude {{originCoord.lng}}
@@ -58,10 +58,13 @@ Contextual Information:
 - Current congestion on admin-defined routes (0-100, higher is worse): {{#if congestionData}}{{#each congestionData}}{{{@key}}}: {{{this}}}{{#unless @last}}, {{/unless}}{{/each}}{{else}}No congestion data available{{/if}}.
 
 Task:
-1.  Suggest a plausible, drivable route from the origin to the destination within Tacna, Peru.
-2.  The route should avoid blocked areas indicated by the 'blockedRoutes' list and try to minimize travel through highly congested admin-defined routes.
-3.  Provide a textual description of the suggested path (e.g., "Take Av. Principal, turn right on Calle Sol...").
-4.  Provide a list of key latitude/longitude coordinates that represent this path, suitable for tracing on a map. Include the origin and destination as the first and last points. Add intermediate waypoints to reasonably represent the path's shape. Aim for 5-10 points if the route is complex, fewer if it's simple. Ensure these coordinates are geographically sensible for Tacna.
+1.  Suggest a plausible, conceptual drivable route from the origin to the destination within Tacna, Peru.
+2.  The route should strategically avoid areas indicated by the 'blockedRoutes' list and try to minimize travel through highly congested admin-defined routes.
+3.  Provide a textual description of this conceptual path (e.g., "Take Av. Principal, pass near Plaza Vea, then head towards Av. Sol...").
+4.  Provide a list of key latitude/longitude coordinates that represent this conceptual path, suitable as waypoints for Google Maps Directions API.
+    - Include the origin and destination as the first and last points respectively in this 'coordinates' array.
+    - Add intermediate waypoints (1-5 points typically, more if very complex) to reasonably represent the path's shape and guide Google Maps around obstacles. Ensure these coordinates are geographically sensible for Tacna.
+    - The 'coordinates' array MUST contain at least two points (origin and destination).
 5.  Explain your reasoning for choosing this path, especially how you considered blockages and congestion.
 
 Output Format:
@@ -69,7 +72,7 @@ Your output MUST strictly follow the JSON schema provided for 'suggestedPath'.
 The 'coordinates' array must contain objects with 'lat' and 'lng' properties.
 Example for coordinates: [{ "lat": -18.01, "lng": -70.25 }, { "lat": -18.012, "lng": -70.252 }, {"lat": -18.015, "lng": -70.255 }]
 
-Please generate the route now.
+Please generate the conceptual route and waypoints now.
 `,
 });
 
@@ -82,25 +85,29 @@ const suggestAlternativeRoutesFlow = ai.defineFlow(
   async input => {
     const {output} = await prompt(input);
     if (!output || !output.suggestedPath || !output.suggestedPath.coordinates || output.suggestedPath.coordinates.length < 2) {
-      // Fallback or error handling if AI output is not as expected
-      // For simplicity, returning a default path or throwing an error
       console.error("AI did not return a valid path with at least 2 coordinates. Input:", input);
 
-      // Construct a direct line as a fallback if coordinates are too few
       const fallbackCoordinates: RouteCoordinate[] = [];
       if (input.originCoord) fallbackCoordinates.push(input.originCoord);
-      if (input.destinationCoord) fallbackCoordinates.push(input.destinationCoord);
+      // If only origin is provided, or no coords at all, ensure destination is also added to make 2 points
+      if (input.destinationCoord) {
+        if (fallbackCoordinates.length === 0) fallbackCoordinates.push(input.originCoord); // Add origin if missing
+        fallbackCoordinates.push(input.destinationCoord);
+      }
       
-      if (fallbackCoordinates.length < 2 && fallbackCoordinates.length > 0) { // if only one point, duplicate it
-         fallbackCoordinates.push(fallbackCoordinates[0]);
+      // Ensure at least two points, even if they are the same, to prevent crashes downstream
+      if (fallbackCoordinates.length === 0) {
+        fallbackCoordinates.push({lat:0,lng:0}, {lat:0,lng:0});
+      } else if (fallbackCoordinates.length === 1) {
+         fallbackCoordinates.push(fallbackCoordinates[0]); // Duplicate if only one point
       }
 
 
       return {
         suggestedPath: {
-          description: "Could not generate a detailed route. Displaying a direct line as fallback.",
-          coordinates: fallbackCoordinates.length >=2 ? fallbackCoordinates : [{lat:0,lng:0}, {lat:0,lng:0}], // Ensure at least two points for polyline
-          reasoning: "AI failed to generate a valid structured response or path with sufficient points. Please check AI model or prompt.",
+          description: "La IA no pudo generar una ruta detallada. Se muestra una línea directa como alternativa.",
+          coordinates: fallbackCoordinates,
+          reasoning: "La IA no pudo generar una respuesta estructurada válida o una ruta con suficientes puntos. Por favor, verifique el modelo de IA o el prompt.",
         }
       };
     }

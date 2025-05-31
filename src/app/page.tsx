@@ -4,7 +4,7 @@
 import { useState, useEffect } from 'react';
 import { MapDisplay } from '@/components/map/map-display';
 import { RouteOptimizationForm } from '@/components/route-optimization/route-optimization-form';
-import type { Route, CongestionData, NamedLocation, RouteCoordinate, AISuggestedPath } from '@/lib/types';
+import type { Route, CongestionData, NamedLocation, PathGenerationResult, AIConceptualPath } from '@/lib/types';
 import { initialRoutesData, initialCongestionData, initialNamedLocations, LOCAL_STORAGE_ROUTES_KEY } from '@/lib/mock-data';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { AlertCircle } from 'lucide-react';
@@ -16,7 +16,12 @@ export default function HomePage() {
   const [namedLocations] = useState<NamedLocation[]>(initialNamedLocations);
   const [selectedOrigin, setSelectedOrigin] = useState<NamedLocation | null>(null);
   const [selectedDestination, setSelectedDestination] = useState<NamedLocation | null>(null);
-  const [aiSuggestedPath, setAiSuggestedPath] = useState<AISuggestedPath | null>(null);
+  
+  // State for AI's textual output (description, reasoning)
+  const [aiConceptualPathInfo, setAiConceptualPathInfo] = useState<AIConceptualPath | null>(null);
+  // State for the coordinates to be drawn on the map (from Google Directions or AI fallback)
+  const [detailedPathForMapCoordinates, setDetailedPathForMapCoordinates] = useState<AIConceptualPath['coordinates'] | null>(null);
+
   const [isClient, setIsClient] = useState(false);
 
   const isValidRouteArray = (data: any): data is Route[] => {
@@ -55,8 +60,9 @@ export default function HomePage() {
 
   useEffect(() => {
     if (!isClient) return;
-    // Clear AI path if origin or destination changes
-    setAiSuggestedPath(null);
+    // Clear AI path and map path if origin or destination changes
+    setAiConceptualPathInfo(null);
+    setDetailedPathForMapCoordinates(null);
   }, [selectedOrigin, selectedDestination, isClient]);
 
   useEffect(() => {
@@ -68,6 +74,9 @@ export default function HomePage() {
           const updatedRoutes = JSON.parse(event.newValue);
            if (isValidRouteArray(updatedRoutes)) {
             setRoutes(updatedRoutes);
+             // Also clear paths as admin routes might affect suggestions
+            setAiConceptualPathInfo(null);
+            setDetailedPathForMapCoordinates(null);
           } else {
             console.warn("Invalid route data from storage event, ignoring update.");
           }
@@ -82,6 +91,11 @@ export default function HomePage() {
       window.removeEventListener('storage', handleStorageChange);
     };
   }, [isClient]);
+
+  const handlePathGenerated = (result: PathGenerationResult) => {
+    setAiConceptualPathInfo(result.conceptualPath);
+    setDetailedPathForMapCoordinates(result.detailedMapPath);
+  };
 
   if (!isClient) {
     return (
@@ -102,7 +116,7 @@ export default function HomePage() {
         routes={routes}
         origin={selectedOrigin?.coordinates || null}
         destination={selectedDestination?.coordinates || null}
-        aiSuggestedPathCoordinates={aiSuggestedPath?.coordinates || null}
+        aiSuggestedPathCoordinates={detailedPathForMapCoordinates} // Pass the detailed path for map drawing
       />
       <RouteOptimizationForm
         routes={routes}
@@ -112,7 +126,8 @@ export default function HomePage() {
         setSelectedOrigin={setSelectedOrigin}
         selectedDestination={selectedDestination}
         setSelectedDestination={setSelectedDestination}
-        onOptimizationResult={setAiSuggestedPath}
+        onPathGenerated={handlePathGenerated} // Updated prop
+        aiConceptualPathInfo={aiConceptualPathInfo} // Pass current conceptual path info to form
       />
 
       <Card className="mt-8 bg-primary/5 border-primary/20">
@@ -123,7 +138,7 @@ export default function HomePage() {
           <AlertDescription>
             <ul className="list-disc pl-5 space-y-1 text-sm text-foreground/80">
               <li>El estado de las rutas administrables (abierta/bloqueada) se actualiza en tiempo real si un administrador realiza cambios.</li>
-              <li>Las sugerencias de rutas son generadas por IA y buscan la opción más eficiente entre el origen y destino seleccionados.</li>
+              <li>Las sugerencias de rutas son generadas por IA, que proporciona waypoints estratégicos. Google Maps calcula la ruta detallada.</li>
               <li>Los datos de congestión para rutas administrables y ubicaciones (origen/destino) son simulados.</li>
                <li>La visualización del mapa utiliza Google Maps.</li>
             </ul>
