@@ -1,3 +1,4 @@
+
 import type { Metadata } from 'next';
 import Script from 'next/script';
 import './globals.css';
@@ -12,6 +13,7 @@ export const metadata: Metadata = {
 declare global {
   interface Window {
     initMap?: () => void;
+    google?: typeof google; // Ensure google namespace is available
   }
 }
 
@@ -20,7 +22,7 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyDzPa0SZnwuTDGxkcXEmk7TlODjpBg15bQ';
+  const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyDzPa0SZnwuTDGxkcXEmk7TlODjpBg15bQ'; // Fallback only for local dev if .env var is missing
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
@@ -33,7 +35,9 @@ export default function RootLayout({
         <Toaster />
         <Script
           strategy="lazyOnload"
-          src={`https://maps.googleapis.com/maps/api/js?key=${googleMapsApiKey}&callback=initMap`}
+          src={`https://maps.googleapis.com/maps/api/js?key=${googleMapsApiKey}&libraries=places&callback=initMap`}
+          defer
+          async
         />
       </body>
     </html>

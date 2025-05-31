@@ -27,30 +27,36 @@ export function MapDisplay({ routes, origin, destination, aiSuggestedPathCoordin
   const destinationMarkerRef = useRef<google.maps.Marker | null>(null);
 
   useEffect(() => {
+    // This function will be called by the Google Maps script once it's loaded.
+    // Alternatively, we can check for window.google periodically.
     window.initMap = () => {
       setIsApiLoaded(true);
     };
-    if (window.google && window.google.maps) {
+    // If google.maps is already loaded (e.g., on HMR or subsequent navigations), set isApiLoaded true
+    if (typeof window.google !== 'undefined' && typeof window.google.maps !== 'undefined') {
         setIsApiLoaded(true);
     }
   }, []);
 
+  // Initialize map instance
   useEffect(() => {
-    if (!isApiLoaded || !mapRef.current || map) return;
-
-    const newMap = new google.maps.Map(mapRef.current, {
-      center: origin || destination || TACNA_CENTER,
-      zoom: 13,
-      mapId: 'TACNA_TRANSIT_MAP'
-    });
-    setMap(newMap);
-
-  }, [isApiLoaded, map, origin, destination]);
+    if (isApiLoaded && mapRef.current && !map) {
+      const newMap = new google.maps.Map(mapRef.current, {
+        center: TACNA_CENTER,
+        zoom: 13,
+        // mapId: 'TACNA_TRANSIT_MAP', // Removing mapId to default to standard map, avoids potential configuration issues
+        streetViewControl: false,
+        mapTypeControl: false,
+      });
+      setMap(newMap);
+    }
+  }, [isApiLoaded, map]);
 
   // Effect for admin-defined routes
   useEffect(() => {
     if (!map) return;
 
+    // Clear existing admin polylines
     adminPolylinesRef.current.forEach(polyline => polyline.setMap(null));
     adminPolylinesRef.current = [];
 
@@ -69,9 +75,10 @@ export function MapDisplay({ routes, origin, destination, aiSuggestedPathCoordin
           zIndex: 1, // Admin routes below AI route
           icons: isBlocked ? [{
             icon: {
-                path: 'M 0,-1 0,1',
+                path: 'M 0,-1 0,1', // Simple dash
                 strokeOpacity: 1,
                 scale: 3,
+                strokeColor: '#FF0000', // Ensure dash color matches line
                 strokeWeight: 2,
             },
             offset: '0',
@@ -83,7 +90,7 @@ export function MapDisplay({ routes, origin, destination, aiSuggestedPathCoordin
     });
   }, [map, routes]);
 
-  // Effect for AI-suggested path
+  // Effect for AI-suggested path (detailed path from Google Directions)
   useEffect(() => {
     if (!map) return;
 
@@ -103,28 +110,15 @@ export function MapDisplay({ routes, origin, destination, aiSuggestedPathCoordin
         map: map,
         zIndex: 2 // AI route on top
       });
-
-      // Adjust map to fit AI path, origin and destination
-      const bounds = new google.maps.LatLngBounds();
-      path.forEach(p => bounds.extend(p));
-      if (origin) bounds.extend(origin);
-      if (destination) bounds.extend(destination);
-      
-      if (!bounds.isEmpty()) {
-        map.fitBounds(bounds);
-        if (map.getZoom() && map.getZoom() > 16) { // Don't zoom in too much
-            map.setZoom(16);
-        }
-      }
-
     }
-  }, [map, aiSuggestedPathCoordinates, origin, destination]);
+  }, [map, aiSuggestedPathCoordinates]);
 
 
-  // Effect for Origin/Destination markers
+  // Effect for Origin/Destination markers and map bounds
   useEffect(() => {
     if (!map) return;
 
+    // Clear previous markers
     if (originMarkerRef.current) {
       originMarkerRef.current.setMap(null);
       originMarkerRef.current = null;
@@ -134,6 +128,8 @@ export function MapDisplay({ routes, origin, destination, aiSuggestedPathCoordin
       destinationMarkerRef.current = null;
     }
 
+    const bounds = new google.maps.LatLngBounds();
+
     if (origin) {
       originMarkerRef.current = new google.maps.Marker({
         position: origin,
@@ -142,13 +138,14 @@ export function MapDisplay({ routes, origin, destination, aiSuggestedPathCoordin
         icon: {
           path: google.maps.SymbolPath.CIRCLE,
           scale: 8,
-          fillColor: '#FFA500',
+          fillColor: '#FFA500', // Orange
           fillOpacity: 1,
           strokeWeight: 2,
-          strokeColor: '#FFFFFF'
+          strokeColor: '#FFFFFF' // White border for visibility
         },
-        zIndex: 3
+        zIndex: 3 // Markers on top
       });
+      bounds.extend(new google.maps.LatLng(origin.lat, origin.lng));
     }
 
     if (destination) {
@@ -157,37 +154,37 @@ export function MapDisplay({ routes, origin, destination, aiSuggestedPathCoordin
         map: map,
         title: 'Destino',
          icon: {
-          path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+          path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW, // Arrow icon
           scale: 7,
-          fillColor: '#FF4500', // Slightly different orange/red for destination
+          rotation: 0, // Adjust if needed based on map heading or path
+          fillColor: '#FF4500', // Red-Orange
           fillOpacity: 1,
           strokeWeight: 2,
-          strokeColor: '#FFFFFF',
+          strokeColor: '#FFFFFF' // White border
         },
-        zIndex: 3
+        zIndex: 3 // Markers on top
       });
+      bounds.extend(new google.maps.LatLng(destination.lat, destination.lng));
     }
 
-    // Adjust map bounds only if AI path is not present
-    if (!aiSuggestedPathCoordinates || aiSuggestedPathCoordinates.length === 0) {
-        if (origin && destination) {
-            const bounds = new google.maps.LatLngBounds();
-            bounds.extend(origin);
-            bounds.extend(destination);
-            map.fitBounds(bounds);
-            if (map.getZoom() && map.getZoom() > 15) {
-                map.setZoom(15);
-            }
-        } else if (origin) {
-            map.setCenter(origin);
-            map.setZoom(14);
-        } else if (destination) {
-            map.setCenter(destination);
-            map.setZoom(14);
-        } else {
-            map.setCenter(TACNA_CENTER);
-            map.setZoom(13);
+    // Include AI path in bounds calculation if it exists
+    if (aiSuggestedPathCoordinates && aiSuggestedPathCoordinates.length > 0) {
+      aiSuggestedPathCoordinates.forEach(coord => bounds.extend(new google.maps.LatLng(coord.lat, coord.lng)));
+    }
+    
+    // Fit map to bounds if any elements are present
+    if (origin || destination || (aiSuggestedPathCoordinates && aiSuggestedPathCoordinates.length > 0)) {
+      if (!bounds.isEmpty()) {
+        map.fitBounds(bounds);
+        // Prevent excessive zoom after fitBounds on single points or very short paths
+        if (map.getZoom() && map.getZoom() > 16) {
+             map.setZoom(16);
         }
+      }
+    } else {
+      // Default view if nothing is selected
+      map.setCenter(TACNA_CENTER);
+      map.setZoom(13);
     }
 
   }, [map, origin, destination, aiSuggestedPathCoordinates]);
@@ -197,7 +194,7 @@ export function MapDisplay({ routes, origin, destination, aiSuggestedPathCoordin
       <CardHeader>
         <CardTitle className="font-headline text-2xl">Mapa de Rutas de Tacna (Google Maps)</CardTitle>
         <CardDescription>
-          Visualización de rutas administrables y sugerencias de IA. Seleccione origen/destino y obtenga una ruta.
+          Visualización de rutas administrables y sugerencias de IA. Ingrese origen/destino (con autocompletado) y obtenga una ruta.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -206,7 +203,7 @@ export function MapDisplay({ routes, origin, destination, aiSuggestedPathCoordin
             <h3 className="text-lg font-semibold mb-3 text-primary">Mapa Interactivo</h3>
             <div ref={mapRef} className="w-full h-[500px] bg-muted rounded-lg border shadow-inner" />
             <p className="text-xs text-muted-foreground mt-2">
-              Rutas administrables: Azul (abierta), Rojo discontinuo (bloqueada). Ruta IA: Verde. Origen: Naranja. Destino: Rojo-Naranja.
+              Rutas administrables: Azul (abierta), Rojo discontinuo (bloqueada). Ruta IA/Google: Verde. Origen: Naranja. Destino: Rojo-Naranja.
             </p>
           </div>
           <div>
