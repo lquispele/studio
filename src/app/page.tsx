@@ -7,22 +7,34 @@ import type { Route, CongestionData } from '@/lib/types';
 import { initialRoutesData, initialCongestionData, LOCAL_STORAGE_ROUTES_KEY } from '@/lib/mock-data';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { AlertCircle } from 'lucide-react';
-import { Alert, AlertDescription } from '@/components/ui/alert'; // AlertTitle removed as it's not used directly here
+import { Alert, AlertDescription } from '@/components/ui/alert';
 
 export default function HomePage() {
   const [routes, setRoutes] = useState<Route[]>(initialRoutesData);
   const [congestion, setCongestion] = useState<CongestionData>(initialCongestionData);
   const [isClient, setIsClient] = useState(false);
 
+  const isValidRouteArray = (data: any): data is Route[] => {
+    return Array.isArray(data) && data.every(r => 
+      r.id && typeof r.id === 'string' &&
+      r.name && typeof r.name === 'string' &&
+      r.status && (r.status === 'open' || r.status === 'blocked') &&
+      r.pathDescription && typeof r.pathDescription === 'string' &&
+      r.coordinates && Array.isArray(r.coordinates) && 
+      (r.coordinates.length === 0 || r.coordinates.every((c: any) => typeof c.x === 'number' && typeof c.y === 'number'))
+    );
+  };
+
   useEffect(() => {
     setIsClient(true);
     try {
       const storedRoutes = localStorage.getItem(LOCAL_STORAGE_ROUTES_KEY);
       if (storedRoutes) {
-        const parsedRoutes = JSON.parse(storedRoutes) as Route[];
-        if (Array.isArray(parsedRoutes) && parsedRoutes.every(r => r.id && r.name && r.status)) {
+        const parsedRoutes = JSON.parse(storedRoutes);
+        if (isValidRouteArray(parsedRoutes)) {
            setRoutes(parsedRoutes);
         } else {
+          console.warn("Invalid route data in localStorage, resetting to default.");
           localStorage.setItem(LOCAL_STORAGE_ROUTES_KEY, JSON.stringify(initialRoutesData));
           setRoutes(initialRoutesData);
         }
@@ -42,9 +54,11 @@ export default function HomePage() {
     const handleStorageChange = (event: StorageEvent) => {
       if (event.key === LOCAL_STORAGE_ROUTES_KEY && event.newValue) {
         try {
-          const updatedRoutes = JSON.parse(event.newValue) as Route[];
-           if (Array.isArray(updatedRoutes) && updatedRoutes.every(r => r.id && r.name && r.status)) {
+          const updatedRoutes = JSON.parse(event.newValue);
+           if (isValidRouteArray(updatedRoutes)) {
             setRoutes(updatedRoutes);
+          } else {
+            console.warn("Invalid route data from storage event, ignoring update.");
           }
         } catch (error) {
           console.error("Failed to parse updated routes from localStorage:", error);

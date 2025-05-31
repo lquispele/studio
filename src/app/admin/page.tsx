@@ -14,13 +14,24 @@ export default function AdminPage() {
   const [isClient, setIsClient] = useState(false);
   const { toast } = useToast();
 
+  const isValidRouteArray = (data: any): data is Route[] => {
+    return Array.isArray(data) && data.every(r => 
+      r.id && typeof r.id === 'string' &&
+      r.name && typeof r.name === 'string' &&
+      r.status && (r.status === 'open' || r.status === 'blocked') &&
+      r.pathDescription && typeof r.pathDescription === 'string' &&
+      r.coordinates && Array.isArray(r.coordinates) && 
+      (r.coordinates.length === 0 || r.coordinates.every((c: any) => typeof c.x === 'number' && typeof c.y === 'number'))
+    );
+  };
+
   useEffect(() => {
     setIsClient(true);
     try {
       const storedRoutes = localStorage.getItem(LOCAL_STORAGE_ROUTES_KEY);
       if (storedRoutes) {
-        const parsedRoutes = JSON.parse(storedRoutes) as Route[];
-         if (Array.isArray(parsedRoutes) && parsedRoutes.every(r => r.id && r.name && r.status)) {
+        const parsedRoutes = JSON.parse(storedRoutes);
+         if (isValidRouteArray(parsedRoutes)) {
            setRoutes(parsedRoutes);
         } else {
           setRoutes(initialRoutesData);

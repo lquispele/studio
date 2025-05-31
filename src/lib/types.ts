@@ -3,6 +3,7 @@ export interface Route {
   name: string;
   pathDescription: string; // For display purposes
   status: 'open' | 'blocked';
+  coordinates: Array<{ x: number; y: number }>; // For drawing on the simulated map
 }
 
 export interface CongestionData {
