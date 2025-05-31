@@ -15,6 +15,7 @@ import { useForm, type SubmitHandler } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { Save, RotateCcw, ShieldAlert, PlusCircle, Trash2 } from 'lucide-react';
+import { LoadingSpinner } from '@/components/ui/loading-spinner';
 import {
   Dialog,
   DialogContent,
@@ -26,23 +27,21 @@ import {
   DialogClose
 } from "@/components/ui/dialog";
 
+const coordinateStringSchema = z.string().refine(val => {
+  try {
+    const parts = val.split(',').map(s => s.trim());
+    return parts.length === 2 && !isNaN(parseFloat(parts[0])) && !isNaN(parseFloat(parts[1]));
+  } catch {
+    return false;
+  }
+}, 'Formato inválido. Use "lat,lng". Ejemplo: -18.01, -70.25');
 
 const routeFormSchema = z.object({
   id: z.string().min(1, 'ID es requerido').regex(/^[a-zA-Z0-9-_]+$/, "ID solo puede contener letras, números, '-' y '_'"),
   name: z.string().min(3, 'Nombre es requerido (mínimo 3 caracteres).'),
   pathDescription: z.string().min(5, 'Descripción es requerida (mínimo 5 caracteres).'),
-  coordinates: z.string().min(1, 'Coordenadas son requeridas.').refine(val => {
-    try {
-      const pairs = val.split(';').map(p => p.trim()).filter(p => p.length > 0);
-      if (pairs.length < 2) return false; // Must have at least 2 points
-      return pairs.every(pair => {
-        const parts = pair.split(',').map(s => s.trim());
-        return parts.length === 2 && !isNaN(parseFloat(parts[0])) && !isNaN(parseFloat(parts[1]));
-      });
-    } catch {
-      return false;
-    }
-  }, 'Formato de coordenadas inválido. Use "lat,lng; lat,lng; ..." y asegúrese de tener al menos 2 puntos.'),
+  originCoordStr: coordinateStringSchema.describe('Coordenadas de origen (lat,lng).'),
+  destinationCoordStr: coordinateStringSchema.describe('Coordenadas de destino (lat,lng).'),
 });
 type RouteFormValues = z.infer<typeof routeFormSchema>;
 
@@ -51,12 +50,30 @@ export default function AdminPage() {
   const [routes, setRoutes] = useState<Route[]>([]);
   const [isClient, setIsClient] = useState(false);
   const [isAddRouteDialogOpen, setIsAddRouteDialogOpen] = useState(false);
+  const [isAddingRoute, setIsAddingRoute] = useState(false);
+  const [isGoogleMapsApiLoaded, setIsGoogleMapsApiLoaded] = useState(false);
   const { toast } = useToast();
 
   const form = useForm<RouteFormValues>({
     resolver: zodResolver(routeFormSchema),
-    defaultValues: { id: '', name: '', pathDescription: '', coordinates: '' },
+    defaultValues: { id: '', name: '', pathDescription: '', originCoordStr: '', destinationCoordStr: '' },
   });
+
+ useEffect(() => {
+    if (typeof window.google !== 'undefined' && typeof window.google.maps !== 'undefined' && typeof window.google.maps.DirectionsService !== 'undefined') {
+      setIsGoogleMapsApiLoaded(true);
+    } else {
+      // Check periodically if Google Maps API is loaded
+      const intervalId = setInterval(() => {
+        if (typeof window.google !== 'undefined' && typeof window.google.maps !== 'undefined' && typeof window.google.maps.DirectionsService !== 'undefined') {
+          setIsGoogleMapsApiLoaded(true);
+          clearInterval(intervalId);
+        }
+      }, 500);
+      return () => clearInterval(intervalId);
+    }
+  }, []);
+
 
   const isValidRouteObject = (r: any): r is Route => {
     return r && typeof r.id === 'string' &&
@@ -144,34 +161,75 @@ export default function AdminPage() {
     });
   };
 
-  const parseCoordinatesString = (coordsString: string): RouteCoordinate[] => {
-    return coordsString.split(';')
-      .map(p => p.trim())
-      .filter(p => p.length > 0)
-      .map(pair => {
-        const parts = pair.split(',').map(s => parseFloat(s.trim()));
-        return { lat: parts[0], lng: parts[1] };
-      });
+  const parseSingleCoordString = (coordString: string): RouteCoordinate => {
+    const parts = coordString.split(',').map(s => parseFloat(s.trim()));
+    return { lat: parts[0], lng: parts[1] };
   };
 
-  const onAddRouteSubmit: SubmitHandler<RouteFormValues> = (data) => {
+  const onAddRouteSubmit: SubmitHandler<RouteFormValues> = async (data) => {
     if (routes.some(route => route.id === data.id)) {
       form.setError("id", { type: "manual", message: "Este ID de ruta ya existe." });
       return;
     }
-    const newRoute: Route = {
-      id: data.id,
-      name: data.name,
-      pathDescription: data.pathDescription,
-      status: 'open', // Default new routes to open
-      coordinates: parseCoordinatesString(data.coordinates),
-    };
-    const updatedRoutes = [...routes, newRoute];
-    setRoutes(updatedRoutes);
-    saveRoutesToLocalStorage(updatedRoutes);
-    toast({ title: "Ruta Agregada", description: `La ruta "${data.name}" ha sido agregada.` });
-    form.reset();
-    setIsAddRouteDialogOpen(false);
+
+    if (!isGoogleMapsApiLoaded) {
+      toast({ title: "Error", description: "Google Maps API no está completamente cargada. Por favor, espere o refresque la página.", variant: "destructive"});
+      return;
+    }
+
+    setIsAddingRoute(true);
+
+    try {
+      const origin = parseSingleCoordString(data.originCoordStr);
+      const destination = parseSingleCoordString(data.destinationCoordStr);
+
+      const directionsService = new google.maps.DirectionsService();
+      const request: google.maps.DirectionsRequest = {
+        origin: origin,
+        destination: destination,
+        travelMode: google.maps.TravelMode.DRIVING,
+      };
+
+      const result = await new Promise<google.maps.DirectionsResult | null>((resolve, reject) => {
+        directionsService.route(request, (res, status) => {
+          if (status === google.maps.DirectionsStatus.OK && res) {
+            resolve(res);
+          } else {
+            console.error('Google Maps Directions request failed for admin route: ' + status);
+            reject(new Error(`No se pudo generar la ruta con Google Maps: ${status}. Asegúrese que los puntos sean válidos y ruteables.`));
+          }
+        });
+      });
+
+      if (!result || !result.routes || result.routes.length === 0) {
+        throw new Error("Google Maps no devolvió una ruta válida.");
+      }
+
+      const pathCoordinates = result.routes[0].overview_path.map(p => ({ lat: p.lat(), lng: p.lng() }));
+
+      if (pathCoordinates.length < 2) {
+        throw new Error("La ruta generada por Google Maps no tiene suficientes puntos.");
+      }
+
+      const newRoute: Route = {
+        id: data.id,
+        name: data.name,
+        pathDescription: data.pathDescription,
+        status: 'open', 
+        coordinates: pathCoordinates,
+      };
+      const updatedRoutes = [...routes, newRoute];
+      setRoutes(updatedRoutes);
+      saveRoutesToLocalStorage(updatedRoutes);
+      toast({ title: "Ruta Agregada", description: `La ruta "${data.name}" ha sido agregada y trazada con Google Maps.` });
+      form.reset();
+      setIsAddRouteDialogOpen(false);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Error desconocido al generar ruta con Google Maps.";
+      toast({ title: "Error al Agregar Ruta", description: errorMessage, variant: "destructive" });
+    } finally {
+      setIsAddingRoute(false);
+    }
   };
 
   const handleDeleteRoute = (routeIdToDelete: string) => {
@@ -197,7 +255,7 @@ export default function AdminPage() {
             <div>
                 <CardTitle className="font-headline text-3xl text-primary">Panel de Administración de Rutas</CardTitle>
                 <CardDescription className="mt-1">
-                Modifique el estado, agregue o elimine rutas. Los cambios se guardarán localmente.
+                Modifique el estado de rutas, agregue nuevas (trazadas por Google Maps desde origen/destino) o elimine existentes. Los cambios se guardan localmente.
                 </CardDescription>
             </div>
             <ShieldAlert className="h-10 w-10 text-primary"/>
@@ -205,17 +263,21 @@ export default function AdminPage() {
       </CardHeader>
       <CardContent>
         <div className="mb-6 flex flex-col sm:flex-row gap-2 justify-end items-center">
-            <Dialog open={isAddRouteDialogOpen} onOpenChange={setIsAddRouteDialogOpen}>
+            <Dialog open={isAddRouteDialogOpen} onOpenChange={(open) => {
+                setIsAddRouteDialogOpen(open);
+                if (!open) form.reset(); // Reset form when dialog closes
+            }}>
               <DialogTrigger asChild>
-                <Button variant="outline">
-                  <PlusCircle className="mr-2 h-4 w-4" /> Agregar Nueva Ruta
+                <Button variant="outline" disabled={!isGoogleMapsApiLoaded}>
+                  <PlusCircle className="mr-2 h-4 w-4" /> 
+                  {isGoogleMapsApiLoaded ? "Agregar Nueva Ruta" : "Cargando API de Mapas..."}
                 </Button>
               </DialogTrigger>
               <DialogContent className="sm:max-w-[525px]">
                 <DialogHeader>
                   <DialogTitle>Agregar Nueva Ruta Administrable</DialogTitle>
                   <DialogDescription>
-                    Complete los detalles de la nueva ruta. Las coordenadas deben estar en formato "lat,lng; lat,lng; ...".
+                    Defina el ID, nombre y descripción. Luego, ingrese las coordenadas de origen y destino. Google Maps trazará la ruta.
                   </DialogDescription>
                 </DialogHeader>
                 <Form {...form}>
@@ -238,25 +300,36 @@ export default function AdminPage() {
                     />
                     <FormField control={form.control} name="pathDescription" render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Descripción de la Ruta</FormLabel>
-                          <FormControl><Textarea placeholder="Ej: Av. Principal -> Calle Secundaria -> Destino Final" {...field} /></FormControl>
+                          <FormLabel>Descripción Manual de la Ruta</FormLabel>
+                          <FormControl><Textarea placeholder="Ej: Conecta el centro con la zona norte, pasando por Av. Principal." {...field} /></FormControl>
                           <FormMessage />
                         </FormItem>
                       )}
                     />
-                    <FormField control={form.control} name="coordinates" render={({ field }) => (
+                    <FormField control={form.control} name="originCoordStr" render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Coordenadas (lat,lng; lat,lng; ...)</FormLabel>
-                          <FormControl><Textarea rows={3} placeholder="-18.01, -70.25; -18.012, -70.252; -18.015, -70.255" {...field} /></FormControl>
+                          <FormLabel>Coordenadas de Origen (lat,lng)</FormLabel>
+                          <FormControl><Input placeholder="-18.0146, -70.2536" {...field} /></FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                     <FormField control={form.control} name="destinationCoordStr" render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Coordenadas de Destino (lat,lng)</FormLabel>
+                          <FormControl><Input placeholder="-18.0080, -70.2400" {...field} /></FormControl>
                           <FormMessage />
                         </FormItem>
                       )}
                     />
                     <DialogFooter>
                       <DialogClose asChild>
-                        <Button type="button" variant="outline">Cancelar</Button>
+                        <Button type="button" variant="outline" disabled={isAddingRoute}>Cancelar</Button>
                       </DialogClose>
-                      <Button type="submit">Agregar Ruta</Button>
+                      <Button type="submit" disabled={isAddingRoute || !isGoogleMapsApiLoaded}>
+                        {isAddingRoute && <LoadingSpinner className="mr-2" size={16} />}
+                        {isAddingRoute ? "Generando y Agregando..." : "Agregar Ruta"}
+                      </Button>
                     </DialogFooter>
                   </form>
                 </Form>
@@ -279,3 +352,4 @@ export default function AdminPage() {
     </Card>
   );
 }
+
