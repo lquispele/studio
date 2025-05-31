@@ -107,67 +107,57 @@ export function RouteOptimizationForm({
     };
 
     // Initialize Origin Autocomplete
-    if (!originAutocompleteRef.current) {
+    if (!originAutocompleteRef.current && originInputRef.current) {
         originAutocompleteRef.current = new google.maps.places.Autocomplete(originInputRef.current, autocompleteOptions);
         originAutocompleteRef.current.addListener('place_changed', () => {
         const place = originAutocompleteRef.current?.getPlace();
         if (place?.geometry?.location) {
           setSelectedOrigin({ lat: place.geometry.location.lat(), lng: place.geometry.location.lng() });
-          form.setValue('originText', place.formatted_address || place.name || '');
+          form.setValue('originText', place.formatted_address || place.name || '', { shouldValidate: true });
           onPathGenerated({ conceptualPath: null, detailedMapPath: null }); // Clear old path
+          setAiError(null);
         } else {
-            // User typed something but didn't select a place, or place has no geometry
-            setSelectedOrigin(null); 
-             toast({title: "Origen no seleccionado", description: "Por favor, seleccione un lugar de la lista o ingrese una dirección válida.", variant:"default"});
+            // Don't clear setSelectedOrigin here if user types something invalid after selecting a valid place
+            // Only show toast if place is truly not found by autocomplete selection
+            // This case (no geometry.location) is less common for a 'place_changed' event if a suggestion was clicked
+             if(form.getValues('originText')){ // if there's text, but no valid place selected
+                toast({title: "Origen no geocodificado", description: "Por favor, seleccione un lugar válido de la lista para el origen o verifique la dirección.", variant:"default"});
+             }
         }
       });
     }
 
     // Initialize Destination Autocomplete
-    if (!destinationAutocompleteRef.current) {
+    if (!destinationAutocompleteRef.current && destinationInputRef.current) {
         destinationAutocompleteRef.current = new google.maps.places.Autocomplete(destinationInputRef.current, autocompleteOptions);
         destinationAutocompleteRef.current.addListener('place_changed', () => {
         const place = destinationAutocompleteRef.current?.getPlace();
         if (place?.geometry?.location) {
           setSelectedDestination({ lat: place.geometry.location.lat(), lng: place.geometry.location.lng() });
-          form.setValue('destinationText', place.formatted_address || place.name || '');
+          form.setValue('destinationText', place.formatted_address || place.name || '', { shouldValidate: true });
           onPathGenerated({ conceptualPath: null, detailedMapPath: null }); // Clear old path
+          setAiError(null);
         } else {
-            setSelectedDestination(null);
-            toast({title: "Destino no seleccionado", description: "Por favor, seleccione un lugar de la lista o ingrese una dirección válida.", variant:"default"});
+            if(form.getValues('destinationText')){
+                 toast({title: "Destino no geocodificado", description: "Por favor, seleccione un lugar válido de la lista para el destino o verifique la dirección.", variant:"default"});
+            }
         }
       });
     }
-    // Cleanup listeners when component unmounts
-    // Note: Google Maps listeners might need more specific cleanup if issues arise.
-    // For Autocomplete, simply nullifying the ref might be enough if the input is removed from DOM.
-    // Or use google.maps.event.clearInstanceListeners(autocompleteInstance); if needed.
-  }, [isGoogleMapsApiLoaded, setSelectedOrigin, setSelectedDestination, form, onPathGenerated]);
+  }, [isGoogleMapsApiLoaded, setSelectedOrigin, setSelectedDestination, form, onPathGenerated, toast]);
 
 
-  // Effect to clear paths if text inputs are manually changed *after* a selection was made
-  // This is a bit tricky with Autocomplete also setting the text.
-  // For now, we rely on Autocomplete setting the selectedOrigin/Destination.
-  // If user types something invalid, selectedOrigin/Destination will be null.
+  // Effect to clear conceptual path if text inputs are manually changed *after* a selection was made
+  // This is mainly for clearing the AI's textual output if inputs change
   useEffect(() => {
     const subscription = form.watch((value, { name, type }) => {
-      if (type === 'change') { // User is typing
-        if (name === 'originText' && selectedOrigin) {
-           // If text differs from what Autocomplete might have set for selectedOrigin, nullify it
-           // This logic might need refinement if Autocomplete sets a slightly different formatted_address
-           // For now, a simpler approach is taken: if user types, it potentially invalidates selection.
-          // setSelectedOrigin(null);
-        }
-        if (name === 'destinationText' && selectedDestination) {
-          // setSelectedDestination(null);
-        }
-         // Always clear path when user types in input fields
+      if (type === 'change') { 
         onPathGenerated({ conceptualPath: null, detailedMapPath: null });
-        setAiError(null); // Clear AI error too
+        setAiError(null);
       }
     });
     return () => subscription.unsubscribe();
-  }, [form, selectedOrigin, setSelectedOrigin, selectedDestination, setSelectedDestination, onPathGenerated]);
+  }, [form, onPathGenerated]);
 
 
   const geocodeAddress = async (address: string): Promise<RouteCoordinate | null> => {
@@ -206,21 +196,21 @@ export function RouteOptimizationForm({
 
     setIsLoading(true);
     setAiError(null);
-    onPathGenerated({ conceptualPath: null, detailedMapPath: null }); // Clear previous path
+    onPathGenerated({ conceptualPath: null, detailedMapPath: null }); // Clear previous path before new generation
 
     let originForAI: RouteCoordinate | null = selectedOrigin;
     let destinationForAI: RouteCoordinate | null = selectedDestination;
 
     // If origin/destination not set by Autocomplete, try to geocode the text input
     if (!originForAI && data.originText) {
-      toast({ title: "Geocodificando Origen...", description: data.originText });
+      toast({ title: "Geocodificando Origen...", description: data.originText, duration: 2000 });
       originForAI = await geocodeAddress(data.originText);
       if (originForAI) setSelectedOrigin(originForAI); else {
         setIsLoading(false); return;
       }
     }
     if (!destinationForAI && data.destinationText) {
-      toast({ title: "Geocodificando Destino...", description: data.destinationText });
+      toast({ title: "Geocodificando Destino...", description: data.destinationText, duration: 2000 });
       destinationForAI = await geocodeAddress(data.destinationText);
       if (destinationForAI) setSelectedDestination(destinationForAI); else {
         setIsLoading(false); return;
@@ -228,7 +218,7 @@ export function RouteOptimizationForm({
     }
     
     if (!originForAI || !destinationForAI) {
-       toast({ title: "Error", description: "Origen y/o destino no son válidos. Por favor, selecciónelos de las sugerencias o ingrese direcciones válidas.", variant: "destructive" });
+       toast({ title: "Error de Coordenadas", description: "Origen y/o destino no son válidos o no pudieron ser geocodificados. Por favor, selecciónelos de las sugerencias o ingrese direcciones válidas.", variant: "destructive" });
        setIsLoading(false);
        return;
     }
@@ -245,15 +235,18 @@ export function RouteOptimizationForm({
     };
 
     try {
-      toast({ title: "Consultando IA para ruta conceptual...", variant: "default"});
+      toast({ title: "Consultando IA para ruta conceptual...", variant: "default", duration: 3000});
       const aiOutput = await suggestAlternativeRoutes(aiInput);
       const conceptualPath = aiOutput.suggestedPath;
 
       if (!conceptualPath || conceptualPath.coordinates.length < 2) {
-         throw new Error("La IA no pudo generar una ruta conceptual con suficientes puntos. Intente ajustar su origen/destino o verifique las rutas bloqueadas.");
+         // Set AI error, but still provide the direct line for map path if possible
+        const directPathForMap = (originForAI && destinationForAI) ? [originForAI, destinationForAI] : null;
+        onPathGenerated({ conceptualPath: null, detailedMapPath: directPathForMap});
+        throw new Error("La IA no pudo generar una ruta conceptual con suficientes puntos. Se muestra una línea directa si es posible.");
       }
       
-      toast({ title: "IA sugirió waypoints. Obteniendo ruta detallada de Google Maps...", variant: "default"});
+      toast({ title: "IA sugirió waypoints. Obteniendo ruta detallada de Google Maps...", variant: "default", duration: 3000});
       if (!google.maps.DirectionsService) {
         throw new Error("Google Maps Directions Service no está disponible.");
       }
@@ -272,23 +265,22 @@ export function RouteOptimizationForm({
             resolve(res);
           } else {
             console.error('Google Maps Directions request failed: ' + status, res);
-            reject(new Error(`Google Maps no pudo trazar una ruta detallada con los waypoints de la IA (Error: ${status}).`));
+            reject(new Error(`Google Maps no pudo trazar una ruta detallada con los waypoints de la IA (Error: ${status}). Se mostrará la ruta conceptual de la IA si está disponible.`));
           }
         });
       });
       
       if (result && result.routes && result.routes.length > 0) {
           const detailedMapPath = result.routes[0].overview_path.map(p => ({ lat: p.lat(), lng: p.lng() }));
-          onPathGenerated({ conceptualPath, detailedMapPath });
+          onPathGenerated({ conceptualPath, detailedMapPath }); // Pass both
           toast({
             title: "Ruta Detallada Generada",
             description: "Google Maps ha calculado una ruta basada en la sugerencia de la IA.",
             variant: "default",
-            action: <CheckCircle className="text-green-500" />,
           });
         } else {
-           // This case should ideally be caught by the promise rejection, but as a fallback:
-          throw new Error("Google Maps no devolvió una ruta válida.");
+          // This case should ideally be caught by the promise rejection, but as a fallback:
+          throw new Error("Google Maps no devolvió una ruta válida. Se mostrará la ruta conceptual de la IA si está disponible.");
         }
 
     } catch (error) {
@@ -296,19 +288,19 @@ export function RouteOptimizationForm({
       const errorMessage = error instanceof Error ? error.message : 'Ocurrió un error desconocido al generar la ruta.';
       setAiError(errorMessage);
       // Fallback to AI conceptual path for drawing if Directions API failed but AI provided something
-      if (error instanceof Error && (error.message.includes("Google Maps no pudo") || error.message.includes("IA no pudo")) && aiInput.originCoord && aiInput.destinationCoord) {
-        const conceptualPathForMap = (aiConceptualPathInfo && aiConceptualPathInfo.coordinates.length >=2) 
-            ? aiConceptualPathInfo.coordinates 
-            : [aiInput.originCoord, aiInput.destinationCoord]; // Direct line as last resort
-        onPathGenerated({ conceptualPath: aiConceptualPathInfo, detailedMapPath: conceptualPathForMap });
-      } else {
-        onPathGenerated({ conceptualPath: null, detailedMapPath: null }); 
-      }
+      // or if the initial AI error occurred but we have origin/destination
+      const fallbackPath = (aiConceptualPathInfo && aiConceptualPathInfo.coordinates.length >=2) 
+          ? aiConceptualPathInfo.coordinates 
+          : (originForAI && destinationForAI ? [originForAI, destinationForAI] : null); // Direct line as last resort
+
+      onPathGenerated({ 
+          conceptualPath: (error instanceof Error && error.message.includes("IA no pudo")) ? null : aiConceptualPathInfo, // Keep AI text if error was from Google Maps
+          detailedMapPath: fallbackPath
+      });
       toast({
         title: "Error en la Optimización",
         description: errorMessage,
         variant: "destructive",
-        action: <AlertTriangle className="text-white"/>,
       });
     } finally {
       setIsLoading(false);
@@ -316,16 +308,19 @@ export function RouteOptimizationForm({
   };
   
   useEffect(() => {
-    if (!isGoogleMapsApiLoaded) return; // Don't reset if API not loaded, form may not be ready
+    if (!isGoogleMapsApiLoaded) return;
     form.reset({ originText: '', destinationText: '' });
     setSelectedOrigin(null);
     setSelectedDestination(null);
     onPathGenerated({ conceptualPath: null, detailedMapPath: null });
     setAiError(null);
-  }, [routes, form, setSelectedOrigin, setSelectedDestination, onPathGenerated, isGoogleMapsApiLoaded]);
+  }, [routes, isGoogleMapsApiLoaded]); // Removed form, setSelectedOrigin etc to prevent loop, page load handles reset if routes change.
 
 
-  const canSubmit = isGoogleMapsApiLoaded && (selectedOrigin || form.getValues('originText').length >=3) && (selectedDestination || form.getValues('destinationText').length >=3) && !isLoading;
+  const canSubmit = isGoogleMapsApiLoaded && 
+                    (selectedOrigin || form.getValues('originText').length >=3) && 
+                    (selectedDestination || form.getValues('destinationText').length >=3) && 
+                    !isLoading;
 
   return (
     <Card className="shadow-lg mt-8">
@@ -350,7 +345,10 @@ export function RouteOptimizationForm({
                         ref={originInputRef} 
                         onChange={(e) => {
                             field.onChange(e); // RHF's onChange
-                            if (!e.target.value) setSelectedOrigin(null); // Clear selection if input cleared
+                            if (!e.target.value) { // If input is manually cleared
+                                setSelectedOrigin(null);
+                                // onPathGenerated({ conceptualPath: null, detailedMapPath: null }); // Clearing path is handled by form.watch
+                            }
                         }}
                         />
                     </FormControl>
@@ -371,7 +369,10 @@ export function RouteOptimizationForm({
                         ref={destinationInputRef} 
                         onChange={(e) => {
                             field.onChange(e); // RHF's onChange
-                            if (!e.target.value) setSelectedDestination(null); // Clear selection if input cleared
+                             if (!e.target.value) { // If input is manually cleared
+                                setSelectedDestination(null);
+                                // onPathGenerated({ conceptualPath: null, detailedMapPath: null }); // Clearing path is handled by form.watch
+                            }
                         }}
                         />
                     </FormControl>
@@ -427,4 +428,5 @@ export function RouteOptimizationForm({
       )}
     </Card>
   );
-}
+
+    
