@@ -1,9 +1,14 @@
+export interface RouteCoordinate {
+  lat: number;
+  lng: number;
+}
+
 export interface Route {
   id: string;
   name: string;
   pathDescription: string; // For display purposes
   status: 'open' | 'blocked';
-  coordinates: Array<{ lat: number; lng: number }>; // For Google Maps
+  coordinates: RouteCoordinate[]; // For Google Maps
 }
 
 export interface CongestionData {
@@ -13,5 +18,11 @@ export interface CongestionData {
 export interface NamedLocation {
   id: string;
   name: string;
-  coordinates: { lat: number; lng: number }; // For Google Maps
+  coordinates: RouteCoordinate; // For Google Maps
+}
+
+export interface AISuggestedPath {
+  description: string;
+  coordinates: RouteCoordinate[];
+  reasoning: string;
 }

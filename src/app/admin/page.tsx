@@ -1,28 +1,74 @@
+
 'use client';
 
 import { useState, useEffect } from 'react';
 import { RouteManagementTable } from '@/components/admin/route-management-table';
-import type { Route } from '@/lib/types';
+import type { Route, RouteCoordinate } from '@/lib/types';
 import { initialRoutesData, LOCAL_STORAGE_ROUTES_KEY } from '@/lib/mock-data';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Save, RotateCcw, ShieldAlert } from 'lucide-react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { useForm, type SubmitHandler } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import * as z from 'zod';
+import { Save, RotateCcw, ShieldAlert, PlusCircle, Trash2 } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  DialogFooter,
+  DialogClose
+} from "@/components/ui/dialog";
+
+
+const routeFormSchema = z.object({
+  id: z.string().min(1, 'ID es requerido').regex(/^[a-zA-Z0-9-_]+$/, "ID solo puede contener letras, números, '-' y '_'"),
+  name: z.string().min(3, 'Nombre es requerido (mínimo 3 caracteres).'),
+  pathDescription: z.string().min(5, 'Descripción es requerida (mínimo 5 caracteres).'),
+  coordinates: z.string().min(1, 'Coordenadas son requeridas.').refine(val => {
+    try {
+      const pairs = val.split(';').map(p => p.trim()).filter(p => p.length > 0);
+      if (pairs.length < 2) return false; // Must have at least 2 points
+      return pairs.every(pair => {
+        const parts = pair.split(',').map(s => s.trim());
+        return parts.length === 2 && !isNaN(parseFloat(parts[0])) && !isNaN(parseFloat(parts[1]));
+      });
+    } catch {
+      return false;
+    }
+  }, 'Formato de coordenadas inválido. Use "lat,lng; lat,lng; ..." y asegúrese de tener al menos 2 puntos.'),
+});
+type RouteFormValues = z.infer<typeof routeFormSchema>;
+
 
 export default function AdminPage() {
-  const [routes, setRoutes] = useState<Route[]>(initialRoutesData);
+  const [routes, setRoutes] = useState<Route[]>([]);
   const [isClient, setIsClient] = useState(false);
+  const [isAddRouteDialogOpen, setIsAddRouteDialogOpen] = useState(false);
   const { toast } = useToast();
 
+  const form = useForm<RouteFormValues>({
+    resolver: zodResolver(routeFormSchema),
+    defaultValues: { id: '', name: '', pathDescription: '', coordinates: '' },
+  });
+
+  const isValidRouteObject = (r: any): r is Route => {
+    return r && typeof r.id === 'string' &&
+      typeof r.name === 'string' &&
+      (r.status === 'open' || r.status === 'blocked') &&
+      typeof r.pathDescription === 'string' &&
+      Array.isArray(r.coordinates) &&
+      (r.coordinates.length === 0 || r.coordinates.every((c: any) => typeof c.lat === 'number' && typeof c.lng === 'number'));
+  }
+
   const isValidRouteArray = (data: any): data is Route[] => {
-    return Array.isArray(data) && data.every(r => 
-      r.id && typeof r.id === 'string' &&
-      r.name && typeof r.name === 'string' &&
-      r.status && (r.status === 'open' || r.status === 'blocked') &&
-      r.pathDescription && typeof r.pathDescription === 'string' &&
-      r.coordinates && Array.isArray(r.coordinates) && 
-      (r.coordinates.length === 0 || r.coordinates.every((c: any) => typeof c.lat === 'number' && typeof c.lng === 'number'))
-    );
+    return Array.isArray(data) && data.every(isValidRouteObject);
   };
 
   useEffect(() => {
@@ -34,20 +80,17 @@ export default function AdminPage() {
          if (isValidRouteArray(parsedRoutes)) {
            setRoutes(parsedRoutes);
         } else {
+          console.warn("Invalid stored routes, restoring defaults.");
           setRoutes(initialRoutesData);
           localStorage.setItem(LOCAL_STORAGE_ROUTES_KEY, JSON.stringify(initialRoutesData));
-          toast({
-            title: "Datos de rutas corruptos",
-            description: "Se han restaurado los datos de rutas por defecto.",
-            variant: "destructive"
-          });
         }
       } else {
+        setRoutes(initialRoutesData);
         localStorage.setItem(LOCAL_STORAGE_ROUTES_KEY, JSON.stringify(initialRoutesData));
       }
     } catch (error) {
-      console.error("Failed to load routes from localStorage for admin:", error);
-      setRoutes(initialRoutesData); 
+      console.error("Failed to load/parse routes from localStorage:", error);
+      setRoutes(initialRoutesData);
       localStorage.setItem(LOCAL_STORAGE_ROUTES_KEY, JSON.stringify(initialRoutesData));
        toast({
             title: "Error al cargar rutas",
@@ -67,44 +110,77 @@ export default function AdminPage() {
     );
   };
 
-  const handleSaveChanges = () => {
-    if(!isClient) return;
+  const saveRoutesToLocalStorage = (updatedRoutes: Route[]) => {
     try {
-      localStorage.setItem(LOCAL_STORAGE_ROUTES_KEY, JSON.stringify(routes));
-      toast({
-        title: "Cambios Guardados",
-        description: "El estado de las rutas ha sido actualizado.",
-        variant: "default"
-      });
+      localStorage.setItem(LOCAL_STORAGE_ROUTES_KEY, JSON.stringify(updatedRoutes));
     } catch (error) {
       console.error("Failed to save routes to localStorage:", error);
-       toast({
-        title: "Error al Guardar",
-        description: "No se pudieron guardar los cambios en las rutas.",
+      toast({
+        title: "Error al Guardar en LocalStorage",
+        description: "No se pudieron persistir los cambios en las rutas.",
         variant: "destructive"
       });
     }
+  }
+
+  const handleSaveChanges = () => {
+    if(!isClient) return;
+    saveRoutesToLocalStorage(routes);
+    toast({
+      title: "Cambios Guardados",
+      description: "El estado de las rutas ha sido actualizado.",
+      variant: "default"
+    });
   };
-  
+
   const handleResetToDefault = () => {
     if(!isClient) return;
     setRoutes(initialRoutesData);
-    try {
-      localStorage.setItem(LOCAL_STORAGE_ROUTES_KEY, JSON.stringify(initialRoutesData));
-      toast({
-        title: "Rutas Restauradas",
-        description: "Todas las rutas han sido restauradas a su estado por defecto.",
-        variant: "default"
-      });
-    } catch (error) {
-       console.error("Failed to reset routes in localStorage:", error);
-       toast({
-        title: "Error al Restaurar",
-        description: "No se pudieron restaurar las rutas por defecto.",
-        variant: "destructive"
-      });
-    }
+    saveRoutesToLocalStorage(initialRoutesData);
+    toast({
+      title: "Rutas Restauradas",
+      description: "Todas las rutas han sido restauradas a su estado por defecto.",
+      variant: "default"
+    });
   };
+
+  const parseCoordinatesString = (coordsString: string): RouteCoordinate[] => {
+    return coordsString.split(';')
+      .map(p => p.trim())
+      .filter(p => p.length > 0)
+      .map(pair => {
+        const parts = pair.split(',').map(s => parseFloat(s.trim()));
+        return { lat: parts[0], lng: parts[1] };
+      });
+  };
+
+  const onAddRouteSubmit: SubmitHandler<RouteFormValues> = (data) => {
+    if (routes.some(route => route.id === data.id)) {
+      form.setError("id", { type: "manual", message: "Este ID de ruta ya existe." });
+      return;
+    }
+    const newRoute: Route = {
+      id: data.id,
+      name: data.name,
+      pathDescription: data.pathDescription,
+      status: 'open', // Default new routes to open
+      coordinates: parseCoordinatesString(data.coordinates),
+    };
+    const updatedRoutes = [...routes, newRoute];
+    setRoutes(updatedRoutes);
+    saveRoutesToLocalStorage(updatedRoutes);
+    toast({ title: "Ruta Agregada", description: `La ruta "${data.name}" ha sido agregada.` });
+    form.reset();
+    setIsAddRouteDialogOpen(false);
+  };
+
+  const handleDeleteRoute = (routeIdToDelete: string) => {
+    const updatedRoutes = routes.filter(route => route.id !== routeIdToDelete);
+    setRoutes(updatedRoutes);
+    saveRoutesToLocalStorage(updatedRoutes);
+    toast({ title: "Ruta Eliminada", description: `La ruta con ID "${routeIdToDelete}" ha sido eliminada.` });
+  };
+
 
   if (!isClient) {
     return (
@@ -121,23 +197,84 @@ export default function AdminPage() {
             <div>
                 <CardTitle className="font-headline text-3xl text-primary">Panel de Administración de Rutas</CardTitle>
                 <CardDescription className="mt-1">
-                Modifique el estado de las rutas (abierta/bloqueada). Los cambios se guardarán localmente en su navegador y
-                se reflejarán para los usuarios que utilicen la aplicación en este mismo navegador.
+                Modifique el estado, agregue o elimine rutas. Los cambios se guardarán localmente.
                 </CardDescription>
             </div>
             <ShieldAlert className="h-10 w-10 text-primary"/>
         </div>
       </CardHeader>
       <CardContent>
-        <div className="mb-6 flex flex-col sm:flex-row gap-2 justify-end">
+        <div className="mb-6 flex flex-col sm:flex-row gap-2 justify-end items-center">
+            <Dialog open={isAddRouteDialogOpen} onOpenChange={setIsAddRouteDialogOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline">
+                  <PlusCircle className="mr-2 h-4 w-4" /> Agregar Nueva Ruta
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-[525px]">
+                <DialogHeader>
+                  <DialogTitle>Agregar Nueva Ruta Administrable</DialogTitle>
+                  <DialogDescription>
+                    Complete los detalles de la nueva ruta. Las coordenadas deben estar en formato "lat,lng; lat,lng; ...".
+                  </DialogDescription>
+                </DialogHeader>
+                <Form {...form}>
+                  <form onSubmit={form.handleSubmit(onAddRouteSubmit)} className="space-y-4 py-2">
+                    <FormField control={form.control} name="id" render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>ID de Ruta (único)</FormLabel>
+                          <FormControl><Input placeholder="Ej: R10X" {...field} /></FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField control={form.control} name="name" render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Nombre de la Ruta</FormLabel>
+                          <FormControl><Input placeholder="Ej: Expreso Aeropuerto" {...field} /></FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField control={form.control} name="pathDescription" render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Descripción de la Ruta</FormLabel>
+                          <FormControl><Textarea placeholder="Ej: Av. Principal -> Calle Secundaria -> Destino Final" {...field} /></FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField control={form.control} name="coordinates" render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Coordenadas (lat,lng; lat,lng; ...)</FormLabel>
+                          <FormControl><Textarea rows={3} placeholder="-18.01, -70.25; -18.012, -70.252; -18.015, -70.255" {...field} /></FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <DialogFooter>
+                      <DialogClose asChild>
+                        <Button type="button" variant="outline">Cancelar</Button>
+                      </DialogClose>
+                      <Button type="submit">Agregar Ruta</Button>
+                    </DialogFooter>
+                  </form>
+                </Form>
+              </DialogContent>
+            </Dialog>
+
             <Button onClick={handleSaveChanges} variant="default">
-                <Save className="mr-2 h-4 w-4" /> Guardar Cambios
+                <Save className="mr-2 h-4 w-4" /> Guardar Cambios de Estado
             </Button>
-            <Button onClick={handleResetToDefault} variant="outline">
+            <Button onClick={handleResetToDefault} variant="outline" className="text-destructive border-destructive hover:bg-destructive/10">
                 <RotateCcw className="mr-2 h-4 w-4" /> Restaurar por Defecto
             </Button>
         </div>
-        <RouteManagementTable routes={routes} onToggleRouteStatus={handleToggleRouteStatus} />
+        <RouteManagementTable
+          routes={routes}
+          onToggleRouteStatus={handleToggleRouteStatus}
+          onDeleteRoute={handleDeleteRoute}
+        />
       </CardContent>
     </Card>
   );
