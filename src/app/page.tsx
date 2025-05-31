@@ -3,8 +3,8 @@
 import { useState, useEffect } from 'react';
 import { MapDisplay } from '@/components/map/map-display';
 import { RouteOptimizationForm } from '@/components/route-optimization/route-optimization-form';
-import type { Route, CongestionData } from '@/lib/types';
-import { initialRoutesData, initialCongestionData, LOCAL_STORAGE_ROUTES_KEY } from '@/lib/mock-data';
+import type { Route, CongestionData, NamedLocation } from '@/lib/types';
+import { initialRoutesData, initialCongestionData, initialNamedLocations, LOCAL_STORAGE_ROUTES_KEY } from '@/lib/mock-data';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { AlertCircle } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -12,6 +12,9 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 export default function HomePage() {
   const [routes, setRoutes] = useState<Route[]>(initialRoutesData);
   const [congestion, setCongestion] = useState<CongestionData>(initialCongestionData);
+  const [namedLocations] = useState<NamedLocation[]>(initialNamedLocations);
+  const [selectedOrigin, setSelectedOrigin] = useState<NamedLocation | null>(null);
+  const [selectedDestination, setSelectedDestination] = useState<NamedLocation | null>(null);
   const [isClient, setIsClient] = useState(false);
 
   const isValidRouteArray = (data: any): data is Route[] => {
@@ -87,8 +90,20 @@ export default function HomePage() {
         <p className="text-lg text-muted-foreground">Optimice sus viajes en bus por Tacna. Evite congestiones y rutas bloqueadas.</p>
       </div>
       
-      <MapDisplay routes={routes} />
-      <RouteOptimizationForm routes={routes} congestionData={congestion} />
+      <MapDisplay 
+        routes={routes} 
+        origin={selectedOrigin?.coordinates || null} 
+        destination={selectedDestination?.coordinates || null} 
+      />
+      <RouteOptimizationForm 
+        routes={routes} 
+        congestionData={congestion}
+        namedLocations={namedLocations}
+        selectedOrigin={selectedOrigin}
+        setSelectedOrigin={setSelectedOrigin}
+        selectedDestination={selectedDestination}
+        setSelectedDestination={setSelectedDestination}
+      />
 
       <Card className="mt-8 bg-primary/5 border-primary/20">
         <CardHeader>
@@ -98,8 +113,8 @@ export default function HomePage() {
           <AlertDescription>
             <ul className="list-disc pl-5 space-y-1 text-sm text-foreground/80">
               <li>El estado de las rutas (abierta/bloqueada) se actualiza en tiempo real si un administrador realiza cambios.</li>
-              <li>Las sugerencias de rutas alternativas son generadas por IA y buscan la opción más eficiente.</li>
-              <li>Los datos de congestión son simulados para esta demostración.</li>
+              <li>Las sugerencias de rutas alternativas son generadas por IA y buscan la opción más eficiente basada en la ruta actual seleccionada.</li>
+              <li>Los datos de congestión y ubicaciones (origen/destino) son simulados para esta demostración.</li>
             </ul>
           </AlertDescription>
         </CardContent>

@@ -9,3 +9,9 @@ export interface Route {
 export interface CongestionData {
   [routeName: string]: number; // Congestion level 0-100
 }
+
+export interface NamedLocation {
+  id: string;
+  name: string;
+  coordinates: { x: number; y: number };
+}
